@@ -14,6 +14,7 @@ import http from 'node:http';
 
 const WS_PORT = parseInt(process.env.NAV_WS_PORT ?? '9500', 10);
 const HTTP_PORT = parseInt(process.env.NAV_HTTP_PORT ?? '9498', 10);
+const BIND_HOST = process.env.NAV_BIND_HOST ?? '0.0.0.0'; // 0.0.0.0 for WSL2→Windows access
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 interface NavMessage {
@@ -49,10 +50,10 @@ function broadcast(target: 'cli' | 'extension', data: string) {
 
 // ---- WebSocket Server ----
 
-const wss = new WebSocketServer({ port: WS_PORT, host: '127.0.0.1' });
+const wss = new WebSocketServer({ port: WS_PORT, host: BIND_HOST });
 
 wss.on('listening', () => {
-  console.log(`[nav-daemon] WebSocket listening on ws://127.0.0.1:${WS_PORT}`);
+  console.log(`[nav-daemon] WebSocket listening on ws://${BIND_HOST}:${WS_PORT}`);
   resetIdleTimer(wss);
 });
 
@@ -87,6 +88,8 @@ wss.on('connection', (ws) => {
     if (role === 'cli') {
       broadcast('extension', raw.toString());
     } else if (role === 'extension') {
+      // Skip heartbeat — it's only for keeping the Service Worker alive
+      if (msg.type === 'HEARTBEAT') return;
       broadcast('cli', raw.toString());
     }
   });
@@ -180,8 +183,8 @@ const httpServer = http.createServer((req, res) => {
   res.end(JSON.stringify({ status: 'error', message: 'Not found' }));
 });
 
-httpServer.listen(HTTP_PORT, '127.0.0.1', () => {
-  console.log(`[nav-daemon] HTTP  listening on http://127.0.0.1:${HTTP_PORT}`);
+httpServer.listen(HTTP_PORT, BIND_HOST, () => {
+  console.log(`[nav-daemon] HTTP  listening on http://${BIND_HOST}:${HTTP_PORT}`);
 });
 
 // ---- Graceful Shutdown ----
