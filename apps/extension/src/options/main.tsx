@@ -1,8 +1,25 @@
-import { StrictMode } from 'react';
+import { StrictMode, useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
+import { IconShieldLock, IconCheck } from '@/shared/ui/Icons';
 import '@/index.css';
 
 function OptionsApp() {
+  const [token, setToken] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    chrome.storage.local.get(['navSecret'], (result) => {
+      if (result.navSecret) setToken(result.navSecret);
+    });
+  }, []);
+
+  const handleSave = useCallback(() => {
+    chrome.storage.local.set({ navSecret: token }, () => {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    });
+  }, [token]);
+
   return (
     <div className="min-h-screen bg-surface-base p-8">
       <div className="max-w-2xl mx-auto animate-fade-in">
@@ -16,7 +33,7 @@ function OptionsApp() {
           </div>
         </div>
 
-        <div className="glass-panel p-6">
+        <div className="glass-panel p-6 mb-4">
           <h2 className="text-sm font-semibold text-text-primary mb-4">General</h2>
 
           <div className="space-y-4">
@@ -40,6 +57,36 @@ function OptionsApp() {
             </div>
           </div>
         </div>
+
+        <div className="glass-panel p-6">
+          <h2 className="text-sm font-semibold text-text-primary mb-4">Security</h2>
+
+          <div className="space-y-3">
+            <div>
+              <p className="text-sm text-text-primary">Daemon Secret Token</p>
+              <p className="text-xs text-text-tertiary mb-2">Must match NAV_SECRET in your .env file</p>
+            </div>
+            <div className="flex gap-2">
+              <input
+                id="nav-secret-input"
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Paste your NAV_SECRET here"
+                className="flex-1 bg-surface-overlay border border-border-subtle rounded-md px-3 py-1.5 text-sm text-text-primary font-mono outline-none focus:border-accent-primary"
+              />
+              <button
+                onClick={handleSave}
+                className="px-4 py-1.5 bg-accent-primary text-white text-sm font-medium rounded-md hover:opacity-90 transition-opacity"
+              >
+                {saved ? <><IconCheck size={14} className="inline -mt-0.5" /> Saved</> : 'Save'}
+              </button>
+            </div>
+            <p className="text-xs text-text-tertiary">
+              After saving, reload the extension to apply the new token.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -50,3 +97,4 @@ createRoot(document.getElementById('root')!).render(
     <OptionsApp />
   </StrictMode>
 );
+

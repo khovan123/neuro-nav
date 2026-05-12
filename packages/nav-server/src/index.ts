@@ -9,6 +9,9 @@
    Auto-shuts down after 10 minutes of inactivity.
    ============================================================ */
 
+import { loadEnv } from './loadEnv.js';
+loadEnv();
+
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'node:http';
 import { resolve } from 'node:path';
@@ -20,6 +23,7 @@ const WS_PORT = parseInt(process.env.NAV_WS_PORT ?? '9500', 10);
 const HTTP_PORT = parseInt(process.env.NAV_HTTP_PORT ?? '9498', 10);
 const BIND_HOST = process.env.NAV_BIND_HOST ?? '0.0.0.0'; // 0.0.0.0 for WSL2→Windows access
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const SECRET_TOKEN = process.env.NAV_SECRET ?? 'neuro_nav_secure_token_2026';
 
 interface NavMessage {
   source: 'cli' | 'extension';
@@ -115,7 +119,16 @@ wss.on('listening', () => {
   resetIdleTimer(wss);
 });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // ---- Token Auth via Sec-WebSocket-Protocol ----
+  const protocols = req.headers['sec-websocket-protocol'];
+  const clientToken = protocols ? protocols.split(',')[0].trim() : '';
+  if (clientToken !== SECRET_TOKEN) {
+    console.warn(`[nav-daemon] ⛔ Unauthorized connection from: ${req.socket.remoteAddress}`);
+    ws.close(1008, 'Unauthorized');
+    return;
+  }
+
   let role: 'cli' | 'extension' | null = null;
 
   ws.on('message', async (raw) => {

@@ -6,3 +6,6 @@ dist/
 .env.local
 *.tsbuildinfo
 **/neuro-nav-extension*.zip
+**/AGENTS.md
+**/CLAUDE.md
+**/GEMINI.md

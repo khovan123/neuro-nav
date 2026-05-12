@@ -110,7 +110,30 @@ export async function deleteWorkspace(id: string): Promise<void> {
 
 export async function getAllBranches(): Promise<BranchEntity[]> {
   const db = await getDB();
-  return db.getAll('branches');
+  const raw = await db.getAll('branches');
+  // Migration: legacy branches without activeInWindows
+  const migrated: BranchEntity[] = [];
+  let needsSave = false;
+  for (const branch of raw) {
+    if (!branch.activeInWindows) {
+      console.log(`[Neuro-Nav] Migrating legacy branch: ${branch.name}`);
+      migrated.push({
+        ...branch,
+        isActive: false,
+        activeInWindows: [],
+      });
+      needsSave = true;
+    } else {
+      migrated.push(branch);
+    }
+  }
+  // Persist migrated branches
+  if (needsSave) {
+    for (const b of migrated) {
+      await db.put('branches', b);
+    }
+  }
+  return migrated;
 }
 
 export async function saveBranch(branch: BranchEntity): Promise<void> {
@@ -123,10 +146,17 @@ export async function deleteBranch(id: string): Promise<void> {
   await db.delete('branches', id);
 }
 
+/** Get active branch globally (legacy compat — prefers getActiveBranchForWindow) */
 export async function getActiveBranch(): Promise<BranchEntity | undefined> {
   const db = await getDB();
   const all = await db.getAll('branches');
   return all.find((b) => b.isActive);
+}
+
+/** Get active branch for a specific window */
+export async function getActiveBranchForWindow(windowId: number): Promise<BranchEntity | undefined> {
+  const all = await getAllBranches();
+  return all.find((b) => b.activeInWindows?.includes(windowId));
 }
 
 // ---- Stash Operations ----

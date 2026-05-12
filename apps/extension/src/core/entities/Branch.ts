@@ -10,6 +10,8 @@ export interface BranchEntity {
   parentBranch: string | null;
   tabs: TabSnapshot[];
   isActive: boolean;
+  /** Window IDs where this branch is currently checked out */
+  activeInWindows: number[];
   createdAt: number;
   updatedAt: number;
 }
@@ -25,6 +27,7 @@ export function createBranch(
     parentBranch,
     tabs,
     isActive: false,
+    activeInWindows: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

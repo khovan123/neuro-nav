@@ -8,14 +8,20 @@
      2. HTTP fallback: Quick POST to nav-daemon /command endpoint
    ============================================================ */
 
+import { loadEnv } from './loadEnv.js';
+loadEnv();
+
 import WebSocket from 'ws';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createInterface } from 'node:readline';
 
 const SERVER_URL = process.env.NAV_SERVER ?? 'ws://127.0.0.1:9500';
 const HTTP_URL = process.env.NAV_HTTP ?? 'http://127.0.0.1:9498';
+const SECRET_TOKEN = process.env.NAV_SECRET ?? 'neuro_nav_secure_token_2026';
+const DEFAULT_TOKEN = 'neuro_nav_secure_token_2026';
 const RESPONSE_TIMEOUT_MS = 10_000;
 
 // ---- Colors (ANSI escape codes — no dependency) ----
@@ -106,6 +112,7 @@ function usage() {
   console.log();
   console.log(`${c.bold}COMMANDS${c.reset}`);
   console.log(`  ${c.cyan}help${c.reset}                     Show this help message`);
+  console.log(`  ${c.cyan}init${c.reset}                     First-time setup (generate secret key)`);
   console.log(`  ${c.cyan}checkout <name>${c.reset}           Shorthand for branch checkout`);
   console.log(`  ${c.cyan}branch list${c.reset}              List all branches`);
   console.log(`  ${c.cyan}branch checkout <name>${c.reset}   Switch to a branch`);
@@ -116,7 +123,7 @@ function usage() {
   console.log(`  ${c.cyan}stash pop${c.reset}                Pop the latest stash`);
   console.log(`  ${c.cyan}stash list${c.reset}               List stash entries`);
   console.log(`  ${c.cyan}search <query>${c.reset}           Search indexed pages`);
-  console.log(`  ${c.cyan}scan [path]${c.reset}              Scan project directory for tech stack`);
+  console.log(`  ${c.cyan}scan [path] [--watch]${c.reset}     Scan project directory for tech stack`);
   console.log(`  ${c.cyan}status${c.reset}                   Check daemon connection status`);
   console.log(`  ${c.cyan}ping${c.reset}                     Test connection`);
   console.log();
@@ -133,7 +140,7 @@ function usage() {
 
 function sendCommand(type: string, payload?: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(SERVER_URL);
+    const ws = new WebSocket(SERVER_URL, { headers: { 'Sec-WebSocket-Protocol': SECRET_TOKEN } });
     let responded = false;
 
     const timeout = setTimeout(() => {
@@ -330,11 +337,13 @@ async function handleStatus() {
 }
 
 async function handleScan(args: string[]) {
-  const targetPath = args[0] || '.';
+  const watchMode = args.includes('--watch');
+  const positionalArgs = args.filter((a) => !a.startsWith('--'));
+  const targetPath = positionalArgs[0] || '.';
   const absolutePath = resolve(process.cwd(), targetPath);
   console.log(`${c.cyan}Scanning project: ${absolutePath}${c.reset}`);
 
-  const res = await sendCommand('SCAN_PROJECT', { path: absolutePath }) as {
+  const res = await sendCommand('SCAN_PROJECT', { path: absolutePath, watch: watchMode }) as {
     success?: boolean;
     data?: {
       projectName: string;
@@ -351,7 +360,28 @@ async function handleScan(args: string[]) {
     return;
   }
 
-  const { data } = res;
+  printScanResult(res.data);
+
+  if (watchMode) {
+    console.log(`${c.cyan}👁  Watching for changes... (Ctrl+C to stop)${c.reset}`);
+    // Keep CLI alive — daemon will push WATCH_UPDATE via WebSocket
+    // The daemon re-scans and broadcasts PROJECT_CONTEXT_UPDATE to extension automatically
+    process.on('SIGINT', () => {
+      console.log(`\n${c.dim}Stopped watching.${c.reset}`);
+      process.exit(0);
+    });
+    // Prevent Node from exiting
+    setInterval(() => {}, 60_000);
+  }
+}
+
+function printScanResult(data: {
+  projectName: string;
+  gitBranch: string | null;
+  techStack: Array<{ name: string; version: string | null; category: string; docUrl: string }>;
+  totalFiles: number;
+  totalDirs: number;
+}) {
   console.log();
   console.log(`${c.bold}📂 ${data.projectName}${c.reset}`);
   if (data.gitBranch) {
@@ -376,6 +406,135 @@ async function handleScan(args: string[]) {
   console.log(`${c.green}✓ Context synced to Chrome Extension${c.reset}`);
 }
 
+// ---- Init (First-time Setup) ----
+
+function prompt(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+function findEnvPath(): string {
+  // Walk up from cwd to find existing .env, or default to cwd
+  let dir = resolve(process.cwd());
+  while (true) {
+    const envPath = resolve(dir, '.env');
+    if (existsSync(envPath)) return envPath;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return resolve(process.cwd(), '.env');
+}
+
+function generateToken(): string {
+  try {
+    return execSync('openssl rand -hex 32', { encoding: 'utf-8' }).trim();
+  } catch {
+    // Fallback: use Node crypto
+    return Array.from(crypto.getRandomValues(new Uint8Array(32)))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+}
+
+async function handleInit() {
+  logo();
+  console.log(`${c.bold}🔐 Neuro-Nav Security Setup${c.reset}`);
+  console.log();
+
+  const envPath = findEnvPath();
+  const envExists = existsSync(envPath);
+
+  // Check if already configured
+  if (envExists) {
+    const content = readFileSync(envPath, 'utf-8');
+    const match = content.match(/^NAV_SECRET=(.+)$/m);
+    if (match && match[1] !== DEFAULT_TOKEN) {
+      console.log(`${c.green}✓ NAV_SECRET already configured in:${c.reset} ${envPath}`);
+      console.log();
+      console.log(`${c.dim}Current token: ${match[1].slice(0, 8)}...${match[1].slice(-8)}${c.reset}`);
+      console.log();
+      const overwrite = await prompt(`${c.yellow}Generate a new token? (y/N): ${c.reset}`);
+      if (overwrite.toLowerCase() !== 'y') {
+        console.log(`${c.dim}Keeping existing configuration.${c.reset}`);
+        return;
+      }
+    }
+  }
+
+  // Ask user: generate or paste?
+  console.log(`  ${c.cyan}1${c.reset}) Auto-generate a new token (recommended)`);
+  console.log(`  ${c.cyan}2${c.reset}) Enter token manually`);
+  console.log();
+  const choice = await prompt(`${c.bold}Choose [1/2]: ${c.reset}`);
+
+  let token: string;
+  if (choice === '2') {
+    token = await prompt(`${c.bold}Enter Secret Key (min 8 characters): ${c.reset}`);
+    if (token.length < 8) {
+      console.log(`${c.red}✗ Token must be at least 8 characters${c.reset}`);
+      return;
+    }
+  } else {
+    token = generateToken();
+    console.log(`${c.green}✓ New token generated${c.reset}`);
+  }
+
+  // Write/update .env
+  let envContent = '';
+  if (envExists) {
+    envContent = readFileSync(envPath, 'utf-8');
+    if (envContent.match(/^NAV_SECRET=.+$/m)) {
+      envContent = envContent.replace(/^NAV_SECRET=.+$/m, `NAV_SECRET=${token}`);
+    } else {
+      envContent = envContent.trimEnd() + `\nNAV_SECRET=${token}\n`;
+    }
+  } else {
+    envContent = [
+      '# ============================================================',
+      '# NEURO-NAV — Environment Configuration',
+      '# ============================================================',
+      '',
+      `NAV_SECRET=${token}`,
+      'NAV_WS_PORT=9500',
+      'NAV_HTTP_PORT=9498',
+      'NAV_BIND_HOST=0.0.0.0',
+      '',
+    ].join('\n');
+  }
+
+  writeFileSync(envPath, envContent, 'utf-8');
+
+  console.log();
+  console.log(`${c.green}✓ Saved to:${c.reset} ${envPath}`);
+  console.log();
+  console.log(`${c.bold}📋 Next step:${c.reset}`);
+  console.log(`  Open Chrome Extension → Neuro-Nav Popup`);
+  console.log(`  Paste this token into the ${c.cyan}Secret Key${c.reset} field:`);
+  console.log();
+  console.log(`  ${c.yellow}${c.bold}${token}${c.reset}`);
+  console.log();
+  console.log(`${c.dim}(Token is shown only once. Save it if needed.)${c.reset}`);
+}
+
+function checkSecretGuard(command: string): boolean {
+  // These commands don't need the daemon
+  const skipGuard = ['help', '--help', '-h', 'init'];
+  if (skipGuard.includes(command)) return true;
+
+  if (SECRET_TOKEN === DEFAULT_TOKEN) {
+    console.log(`${c.yellow}⚠ Using default Secret Key (insecure)${c.reset}`);
+    console.log(`  Run ${c.cyan}nav init${c.reset} to set up a secure key.`);
+    console.log();
+  }
+  return true;
+}
+
 // ---- Main ----
 
 async function main(retried = false) {
@@ -386,6 +545,15 @@ async function main(retried = false) {
     usage();
     return;
   }
+
+  // First-time setup
+  if (command === 'init') {
+    await handleInit();
+    return;
+  }
+
+  // Warn if using default insecure token
+  checkSecretGuard(command);
 
   try {
     switch (command) {

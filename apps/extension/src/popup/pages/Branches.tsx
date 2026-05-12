@@ -7,6 +7,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import {
   setBranches, addBranch, removeBranch, setActiveBranch,
   setStashEntries, removeLatestStash,
+  setCurrentWindowId, setActiveBranchForWindow,
 } from '@/store';
 import { fromChromeTab, toSnapshot } from '@/core/entities/Tab';
 import * as branchOps from '@/core/use-cases/manageBranches';
@@ -44,10 +45,20 @@ export function Branches() {
   const [newBranchName, setNewBranchName] = useState('');
   const [creating, setCreating] = useState(false);
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
+  const [windowId, setWindowId] = useState<number | null>(null);
 
   const allPrefixes = [...DEFAULT_PREFIXES, ...customPrefixes];
   const activePrefix = isCustom ? (customPrefix.endsWith('/') ? customPrefix : customPrefix + '/') : prefix;
 
+  // Resolve current window ID on mount
+  useEffect(() => {
+    chrome.windows.getCurrent().then((win) => {
+      if (win.id != null) {
+        setWindowId(win.id);
+        dispatch(setCurrentWindowId(win.id));
+      }
+    });
+  }, [dispatch]);
 
   // Load branches and stash
   useEffect(() => {
@@ -55,11 +66,12 @@ export function Branches() {
     stashOps.listStash().then((s) => dispatch(setStashEntries(s)));
   }, [dispatch]);
 
-  // Get current tabs as snapshots
+  // Get current tabs as snapshots (scoped to this window)
   const getCurrentTabs = useCallback(async () => {
-    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const queryOpts = windowId ? { windowId } : { currentWindow: true as const };
+    const tabs = await chrome.tabs.query(queryOpts);
     return tabs.map(fromChromeTab).map(toSnapshot);
-  }, []);
+  }, [windowId]);
 
   // Create branch
   const handleCreate = useCallback(async () => {
@@ -68,9 +80,13 @@ export function Branches() {
     try {
       const fullName = `${activePrefix}${newBranchName.trim()}`;
       const currentTabs = await getCurrentTabs();
-      const branch = await branchOps.createNewBranch(fullName, currentTabs, true);
+      const branch = await branchOps.createNewBranch(fullName, currentTabs, true, windowId ?? undefined);
       dispatch(addBranch(branch));
-      dispatch(setActiveBranch(branch.name));
+      if (windowId) {
+        dispatch(setActiveBranchForWindow({ windowId, branchName: branch.name }));
+      } else {
+        dispatch(setActiveBranch(branch.name));
+      }
       setNewBranchName('');
       // Persist custom prefix
       if (isCustom && customPrefix.trim()) {
@@ -93,15 +109,15 @@ export function Branches() {
     setCheckingOut(name);
     try {
       const currentTabs = await getCurrentTabs();
-      const { tabsToOpen } = await branchOps.checkoutBranch(name, currentTabs);
+      const wid = windowId ?? (await chrome.windows.getCurrent()).id!;
+      const { tabsToOpen } = await branchOps.checkoutBranch(name, currentTabs, wid);
 
       // Close current tabs and open branch tabs
-      const currentWindow = await chrome.windows.getCurrent();
-      const existingTabs = await chrome.tabs.query({ windowId: currentWindow.id });
+      const existingTabs = await chrome.tabs.query({ windowId: wid });
 
       // Open new tabs first
       for (const tab of tabsToOpen) {
-        await chrome.tabs.create({ windowId: currentWindow.id, url: tab.url, pinned: tab.pinned });
+        await chrome.tabs.create({ windowId: wid, url: tab.url, pinned: tab.pinned });
       }
 
       // Then close old tabs (skip if branch has no tabs)
@@ -111,7 +127,7 @@ export function Branches() {
         }
       }
 
-      dispatch(setActiveBranch(name));
+      dispatch(setActiveBranchForWindow({ windowId: wid, branchName: name }));
       // Reload branches from DB
       const updated = await branchOps.listBranches();
       dispatch(setBranches(updated));
@@ -263,22 +279,29 @@ export function Branches() {
             </div>
           ) : (
             <div className="space-y-1">
-              {branches.map((branch, i) => (
+              {branches.map((branch, i) => {
+                const isActiveHere = windowId != null && branch.activeInWindows?.includes(windowId);
+                const otherWindowCount = (branch.activeInWindows?.length ?? 0) - (isActiveHere ? 1 : 0);
+                const isActiveAnywhere = (branch.activeInWindows?.length ?? 0) > 0;
+
+                return (
                 <div
                   key={branch.id}
                   className={[
                     'flex items-center gap-2 px-2.5 py-2 rounded-lg',
                     'transition-all duration-(--duration-fast)',
                     'animate-fade-in',
-                    branch.isActive
+                    isActiveHere
                       ? 'bg-accent-primary/10 border border-accent-primary/20'
-                      : 'hover:bg-surface-overlay',
+                      : isActiveAnywhere
+                        ? 'bg-accent-secondary/5 border border-accent-secondary/10'
+                        : 'hover:bg-surface-overlay',
                   ].join(' ')}
                   style={{ animationDelay: `${i * 40}ms` }}
                 >
                   <div className={[
                     'status-dot shrink-0',
-                    branch.isActive ? 'status-dot-active' : 'status-dot-idle',
+                    isActiveHere ? 'status-dot-active' : isActiveAnywhere ? 'status-dot-warning' : 'status-dot-idle',
                   ].join(' ')} />
                   <div className="flex-1 min-w-0">
                     <span className="text-sm font-mono text-text-primary truncate block">
@@ -286,9 +309,11 @@ export function Branches() {
                     </span>
                     <span className="text-[10px] text-text-tertiary">
                       {branch.tabs.length} tabs · {new Date(branch.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      {isActiveHere && ' · active here'}
+                      {otherWindowCount > 0 && ` · active in ${otherWindowCount} other window${otherWindowCount > 1 ? 's' : ''}`}
                     </span>
                   </div>
-                  {!branch.isActive && (
+                  {!isActiveHere && (
                     <Button
                       variant="ghost" size="sm"
                       icon={<IconPlay size={11} />}
@@ -298,7 +323,7 @@ export function Branches() {
                       Checkout
                     </Button>
                   )}
-                  {!branch.isActive && (
+                  {!isActiveAnywhere && (
                     <Tooltip content="Delete branch">
                       <button
                         onClick={() => handleDelete(branch.id)}
@@ -309,7 +334,8 @@ export function Branches() {
                     </Tooltip>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
