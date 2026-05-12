@@ -53,6 +53,21 @@ export function App() {
   const dispatch = useAppDispatch();
   const currentPage = useAppSelector((s) => s.nav.currentPage);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [daemonConnected, setDaemonConnected] = useState(false);
+
+  // Listen for daemon connection state changes
+  useEffect(() => {
+    chrome.storage.local.get('daemonConnected', (r) => {
+      setDaemonConnected(!!r.daemonConnected);
+    });
+    const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+      if (changes.daemonConnected) {
+        setDaemonConnected(!!changes.daemonConnected.newValue);
+      }
+    };
+    chrome.storage.local.onChanged.addListener(listener);
+    return () => chrome.storage.local.onChanged.removeListener(listener);
+  }, []);
 
   // Global Cmd/Ctrl+K shortcut
   const handleGlobalKey = useCallback((e: KeyboardEvent) => {
@@ -123,6 +138,9 @@ export function App() {
             <span className="text-[10px] font-mono text-text-tertiary bg-surface-overlay px-1.5 py-0.5 rounded">
               v1.0.0
             </span>
+            <Tooltip content={daemonConnected ? 'Local: Connected' : 'Local: Disconnected'} position="bottom">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${daemonConnected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-zinc-600'}`} />
+            </Tooltip>
           </div>
         </header>
 

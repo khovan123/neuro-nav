@@ -116,6 +116,7 @@ function usage() {
   console.log(`  ${c.cyan}stash pop${c.reset}                Pop the latest stash`);
   console.log(`  ${c.cyan}stash list${c.reset}               List stash entries`);
   console.log(`  ${c.cyan}search <query>${c.reset}           Search indexed pages`);
+  console.log(`  ${c.cyan}scan [path]${c.reset}              Scan project directory for tech stack`);
   console.log(`  ${c.cyan}status${c.reset}                   Check daemon connection status`);
   console.log(`  ${c.cyan}ping${c.reset}                     Test connection`);
   console.log();
@@ -328,6 +329,53 @@ async function handleStatus() {
   }
 }
 
+async function handleScan(args: string[]) {
+  const targetPath = args[0] || '.';
+  const absolutePath = resolve(process.cwd(), targetPath);
+  console.log(`${c.cyan}Scanning project: ${absolutePath}${c.reset}`);
+
+  const res = await sendCommand('SCAN_PROJECT', { path: absolutePath }) as {
+    success?: boolean;
+    data?: {
+      projectName: string;
+      gitBranch: string | null;
+      techStack: Array<{ name: string; version: string | null; category: string; docUrl: string }>;
+      totalFiles: number;
+      totalDirs: number;
+    };
+    error?: string;
+  };
+
+  if (!res.success || !res.data) {
+    console.log(`${c.red}✗ Scan failed: ${res.error || 'Unknown error'}${c.reset}`);
+    return;
+  }
+
+  const { data } = res;
+  console.log();
+  console.log(`${c.bold}📂 ${data.projectName}${c.reset}`);
+  if (data.gitBranch) {
+    console.log(`  Branch: ${c.magenta}${data.gitBranch}${c.reset}`);
+  }
+  console.log(`  Files:  ${data.totalFiles} files in ${data.totalDirs} directories`);
+  console.log();
+
+  if (data.techStack.length > 0) {
+    console.log(`${c.bold}Tech Stack:${c.reset}`);
+    for (const tech of data.techStack) {
+      const version = tech.version ? ` ${c.dim}v${tech.version}${c.reset}` : '';
+      const category = `${c.dim}[${tech.category}]${c.reset}`;
+      console.log(`  ${c.green}●${c.reset} ${tech.name}${version} ${category}`);
+      console.log(`    ${c.dim}${tech.docUrl}${c.reset}`);
+    }
+  } else {
+    console.log(`${c.dim}No recognizable tech stack found${c.reset}`);
+  }
+
+  console.log();
+  console.log(`${c.green}✓ Context synced to Chrome Extension${c.reset}`);
+}
+
 // ---- Main ----
 
 async function main(retried = false) {
@@ -367,6 +415,10 @@ async function main(retried = false) {
 
       case 'status':
         await handleStatus();
+        break;
+
+      case 'scan':
+        await handleScan(args.slice(1));
         break;
 
       case 'ping':

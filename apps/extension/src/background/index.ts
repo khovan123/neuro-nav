@@ -3,15 +3,16 @@
    ============================================================ */
 
 import { createMessageRouter, MSG } from '@/shared/messaging';
-import { pruneOldRecords, getAllWorkspaces, getActiveBranch } from '@/infrastructure/db/database';
+import { pruneOldRecords, getAllWorkspaces, getActiveBranch, saveWorkspace } from '@/infrastructure/db/database';
 import * as branchOps from '@/core/use-cases/manageBranches';
 import * as stashOps from '@/core/use-cases/stashMemory';
 import { processExtractedPage } from '@/core/use-cases/pageIndexer';
-import { searchPages, getIndexCount, pruneOldPages } from '@/infrastructure/search/searchIndex';
+import { searchPages, getIndexCount, pruneOldPages, indexPage } from '@/infrastructure/search/searchIndex';
 import { shouldBlock } from '@/core/use-cases/intentBlocker';
 import { recordPageVisit, recordNavigation, getGraphData } from '@/core/use-cases/graphBuilder';
 import { classifyPage } from '@/core/entities/PageDocument';
 import { fromChromeTab, toSnapshot } from '@/core/entities/Tab';
+import type { ProjectContext } from '@/core/entities/ProjectContext';
 
 // ---- Message Router ----
 
@@ -291,6 +292,59 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   lastTabUrl.delete(tabId);
 });
 
+// ---- Project Context Handler (Phase 3 — Local Symbiosis) ----
+
+const PROJECT_WORKSPACE_ID = 'auto-project-workspace';
+
+async function handleProjectContextUpdate(ctx: ProjectContext): Promise<void> {
+  if (!ctx || !ctx.techStack) return;
+
+  console.log(`[Neuro-Nav] Project context received: ${ctx.projectName} (${ctx.techStack.length} techs)`);
+
+  // 1. Save to chrome.storage.local for popup to read
+  await chrome.storage.local.set({ projectContext: ctx });
+
+  // 2. Inject doc URLs into Orama search index
+  for (const tech of ctx.techStack) {
+    if (!tech.docUrl) continue;
+    await indexPage({
+      url: tech.docUrl,
+      title: `${tech.name} Documentation`,
+      description: `Official docs for ${tech.name}${tech.version ? ` v${tech.version}` : ''} (${tech.category})`,
+      favicon: '',
+      text: `${tech.name} ${tech.category} documentation reference local project`,
+      category: 'docs',
+      extractedAt: Date.now(),
+    });
+  }
+
+  // 3. Create/update auto-workspace with doc tabs
+  const docTabs = ctx.techStack
+    .filter(t => t.docUrl)
+    .map((t, i) => ({
+      url: t.docUrl,
+      title: `${t.name} Docs`,
+      pinned: false,
+      favIconUrl: '',
+      index: i,
+    }));
+
+  if (docTabs.length > 0) {
+    await saveWorkspace({
+      id: PROJECT_WORKSPACE_ID,
+      name: `📂 ${ctx.projectName}`,
+      tabs: docTabs,
+      tags: ['auto', 'project', ...(ctx.gitBranch ? [ctx.gitBranch] : [])],
+      createdAt: ctx.scannedAt,
+      updatedAt: ctx.scannedAt,
+      color: 'hsl(152 68% 52%)',  // green for project
+      icon: '📂',
+    });
+  }
+
+  console.log(`[Neuro-Nav] Indexed ${ctx.techStack.length} doc URLs, workspace updated`);
+}
+
 // ---- CLI Bridge (WebSocket Client → nav-server) ----
 
 const CLI_SERVER_URL = 'ws://127.0.0.1:9500';
@@ -370,6 +424,11 @@ const cliCommandHandlers: Record<string, (payload: unknown) => Promise<unknown>>
     const data = await getGraphData();
     return { success: true, data };
   },
+  SCAN_PROJECT: async (payload) => {
+    // This is forwarded to daemon — daemon handles it directly via SCAN_PROJECT
+    // Return error if daemon is not connected
+    return { success: false, error: 'SCAN_PROJECT must be sent through daemon' };
+  },
 };
 
 let cliSocket: WebSocket | null = null;
@@ -396,6 +455,8 @@ function connectToCLIServer() {
     }
     // Identify as extension
     cliSocket!.send(JSON.stringify({ source: 'extension', type: 'IDENTIFY' }));
+    // Notify popup about daemon state
+    chrome.storage.local.set({ daemonConnected: true });
   };
 
   cliSocket.onmessage = async (event) => {
@@ -408,6 +469,12 @@ function connectToCLIServer() {
 
     // Ignore server ack
     if (msg.type === 'CONNECTED') return;
+
+    // Handle daemon push messages (not request-response)
+    if (msg.type === 'PROJECT_CONTEXT_UPDATE') {
+      await handleProjectContextUpdate(msg.payload as ProjectContext);
+      return;
+    }
 
     // Dispatch to handler
     const handler = cliCommandHandlers[msg.type];
@@ -444,6 +511,8 @@ function connectToCLIServer() {
   cliSocket.onclose = () => {
     console.log('[Neuro-Nav] Disconnected from nav-server');
     cliSocket = null;
+    // Notify popup about daemon state
+    chrome.storage.local.set({ daemonConnected: false });
     scheduleReconnect();
   };
 

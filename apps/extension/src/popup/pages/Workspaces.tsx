@@ -13,15 +13,28 @@ import { Input } from '@/shared/ui/Input';
 import { Badge } from '@/shared/ui/Badge';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { IconPlus, IconPlay, IconTrash, IconDownload, IconUpload, IconGrid, IconGlobe } from '@/shared/ui/Icons';
+import type { ProjectContext } from '@/core/entities/ProjectContext';
 
 export function Workspaces() {
   const dispatch = useAppDispatch();
   const { items: workspaces, loading } = useAppSelector((s) => s.workspaces);
   const [newName, setNewName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [projectCtx, setProjectCtx] = useState<ProjectContext | null>(null);
 
   useEffect(() => {
     db.getAllWorkspaces().then((ws) => dispatch(setWorkspaces(ws)));
+    // Load project context from chrome.storage
+    chrome.storage.local.get('projectContext', (r) => {
+      if (r.projectContext) setProjectCtx(r.projectContext);
+    });
+    const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+      if (changes.projectContext) {
+        setProjectCtx(changes.projectContext.newValue ?? null);
+      }
+    };
+    chrome.storage.local.onChanged.addListener(listener);
+    return () => chrome.storage.local.onChanged.removeListener(listener);
   }, [dispatch]);
 
   const handleSave = useCallback(async () => {
@@ -100,6 +113,52 @@ export function Workspaces() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {/* Auto-workspace from project scan */}
+        {projectCtx && (
+          <div className="card-interactive p-3 animate-fade-in border-l-2 border-l-emerald-400" id="project-workspace-card">
+            <div className="flex items-start gap-2.5">
+              <span className="text-xl shrink-0 mt-0.5">📂</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-text-primary truncate">{projectCtx.projectName}</h3>
+                  {projectCtx.gitBranch && (
+                    <Badge variant="info">{projectCtx.gitBranch}</Badge>
+                  )}
+                  <Badge variant="success">Local</Badge>
+                </div>
+                <p className="text-[11px] text-text-tertiary mt-0.5">
+                  {projectCtx.totalFiles} files · {projectCtx.totalDirs} dirs · {projectCtx.techStack.length} techs
+                </p>
+              </div>
+            </div>
+            {/* Tech stack pills */}
+            <div className="mt-2.5 flex flex-wrap gap-1">
+              {projectCtx.techStack.map((tech) => (
+                <Tooltip key={tech.name} content={`Open ${tech.name} docs`} position="bottom">
+                  <button
+                    onClick={() => chrome.tabs.create({ url: tech.docUrl })}
+                    className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-hover text-text-secondary hover:bg-accent-primary/15 hover:text-accent-primary transition-colors cursor-pointer"
+                  >
+                    {tech.name}{tech.version ? ` ${tech.version}` : ''}
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
+            <div className="mt-3 flex items-center gap-1.5 border-t border-border-subtle pt-2.5">
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<IconPlay size={12} />}
+                onClick={() => {
+                  for (const tech of projectCtx.techStack) {
+                    if (tech.docUrl) chrome.tabs.create({ url: tech.docUrl });
+                  }
+                }}
+              >Open All Docs</Button>
+            </div>
+          </div>
+        )}
+
         {workspaces.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-text-tertiary">
             <IconGrid size={28} className="mb-3 opacity-30" />

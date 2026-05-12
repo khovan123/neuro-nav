@@ -8,6 +8,7 @@ import type { WorkspaceEntity } from '@/core/entities/Workspace';
 import type { BranchEntity } from '@/core/entities/Branch';
 import type { StashEntry } from '@/core/use-cases/stashMemory';
 import type { PeerInfo, SharedWorkspace } from '@/core/entities/Peer';
+import type { ProjectContext } from '@/core/entities/ProjectContext';
 
 // ---- Tabs Slice ----
 
@@ -231,6 +232,29 @@ const navSlice = createSlice({
   },
 });
 
+// ---- Project Slice (Phase 3 — Local Symbiosis) ----
+
+export interface ProjectState {
+  context: ProjectContext | null;
+  daemonConnected: boolean;
+}
+
+const projectSlice = createSlice({
+  name: 'project',
+  initialState: { context: null, daemonConnected: false } as ProjectState,
+  reducers: {
+    setProjectContext(state, action: PayloadAction<ProjectContext>) {
+      state.context = action.payload;
+    },
+    clearProjectContext(state) {
+      state.context = null;
+    },
+    setDaemonConnected(state, action: PayloadAction<boolean>) {
+      state.daemonConnected = action.payload;
+    },
+  },
+});
+
 // ---- Store ----
 
 export const store = configureStore({
@@ -241,6 +265,7 @@ export const store = configureStore({
     stash: stashSlice.reducer,
     peers: peersSlice.reducer,
     nav: navSlice.reducer,
+    project: projectSlice.reducer,
   },
   devTools: process.env.NODE_ENV !== 'production',
 });
@@ -255,3 +280,4 @@ export const { setBranches, addBranch, removeBranch, setActiveBranch, updateBran
 export const { setStashEntries, addStashEntry, removeLatestStash } = stashSlice.actions;
 export const { setMyPeerInfo, setPeers, updatePeerStatus, removePeer, addIncomingShare, dismissIncomingShare } = peersSlice.actions;
 export const { navigate } = navSlice.actions;
+export const { setProjectContext, clearProjectContext, setDaemonConnected } = projectSlice.actions;
