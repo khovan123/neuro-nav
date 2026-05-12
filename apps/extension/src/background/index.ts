@@ -468,7 +468,7 @@ connectToCLIServer();
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    console.log('[Neuro-Nav] Extension installed — v3.0.0');
+    console.log('[Neuro-Nav] Extension installed — v1.0.0');
   } else if (details.reason === 'update') {
     console.log(`[Neuro-Nav] Updated from ${details.previousVersion}`);
   }

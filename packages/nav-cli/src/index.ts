@@ -95,7 +95,7 @@ async function ensureDaemonRunning(): Promise<boolean> {
 // ---- CLI Helpers ----
 
 function logo() {
-  console.log(`${c.magenta}${c.bold}⚡ Neuro-Nav CLI${c.reset} ${c.dim}v3.0.0${c.reset}`);
+  console.log(`${c.magenta}${c.bold}⚡ Neuro-Nav CLI${c.reset} ${c.dim}v1.0.0${c.reset}`);
   console.log();
 }
 

@@ -139,20 +139,21 @@ Terminal (nav-cli)  ── WebSocket ──→  nav-daemon (:9500)  ←── We
 
 ### Cài đặt
 
+**Từ source (khuyến nghị):**
+
+```bash
+# Clone repo xong, chạy:
+cd packages/nav-server && npm link
+cd ../nav-cli && npm link @neuro-nav/server && npm link
+```
+
+Sau khi link xong, lệnh `nav` khả dụng ở bất kỳ đâu trong terminal.
+
+**Từ npm** *(sắp có — sau khi publish):*
+
 ```bash
 npm install -g @neuro-nav/cli
 ```
-
-Chỉ cần vậy thôi. Lệnh `nav` giờ đã khả dụng toàn cục. Daemon nền (`@neuro-nav/server`) được bao gồm như dependency và khởi động tự động.
-
-<details>
-<summary>Dành cho developer (monorepo)</summary>
-
-```bash
-cd packages/nav-cli
-npm link
-```
-</details>
 
 ### Bảng lệnh
 

@@ -121,7 +121,7 @@ export function App() {
               </button>
             </Tooltip>
             <span className="text-[10px] font-mono text-text-tertiary bg-surface-overlay px-1.5 py-0.5 rounded">
-              v3.0.0
+              v1.0.0
             </span>
           </div>
         </header>

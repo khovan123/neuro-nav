@@ -139,20 +139,21 @@ Terminal (nav-cli)  ── WebSocket ──→  nav-daemon (:9500)  ←── We
 
 ### Installation
 
+**From source (recommended):**
+
+```bash
+# Clone the repo, then:
+cd packages/nav-server && npm link
+cd ../nav-cli && npm link @neuro-nav/server && npm link
+```
+
+After linking, the `nav` command is available globally in your terminal.
+
+**From npm** *(coming soon — after publish):*
+
 ```bash
 npm install -g @neuro-nav/cli
 ```
-
-That's it. The `nav` command is now available globally. The background daemon (`@neuro-nav/server`) is included as a dependency and starts automatically.
-
-<details>
-<summary>For developers (monorepo)</summary>
-
-```bash
-cd packages/nav-cli
-npm link
-```
-</details>
 
 ### Command Reference
 
