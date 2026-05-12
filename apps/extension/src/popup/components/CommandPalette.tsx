@@ -3,7 +3,8 @@
    ============================================================ */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { searchPages, getIndexCount, type SearchResult } from '@/infrastructure/search/searchIndex';
+import { getIndexCount, type SearchResult } from '@/infrastructure/search/searchIndex';
+import { sendToBackground, MSG } from '@/shared/messaging';
 import { Badge, type BadgeVariant } from '@/shared/ui/Badge';
 import { IconSearch, IconClose, IconMonitor, IconFileText, IconMessageCircle, IconFilm, IconShoppingCart, IconMail, IconGlobe } from '@/shared/ui/Icons';
 
@@ -30,6 +31,20 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+/**
+ * Build a URL with a Text Fragment for Chrome's scroll-to-text + highlight.
+ * Extracts the first ~5 words from the matching chunk to use as the fragment.
+ */
+function buildTextFragmentUrl(url: string, chunkText?: string): string {
+  if (!chunkText) return url;
+  // Take first 5 words, trimming any leading/trailing whitespace
+  const words = chunkText.trim().split(/\s+/).slice(0, 5).join(' ');
+  if (!words) return url;
+  // Strip any existing fragment from the URL before appending
+  const base = url.split('#')[0];
+  return `${base}#:~:text=${encodeURIComponent(words)}`;
 }
 
 export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
@@ -62,8 +77,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const hits = await searchPages(query, 8);
-        setResults(hits);
+        // Search through background to get branch-scoped results
+        const response = await sendToBackground<{ query: string; limit: number }, SearchResult[]>(
+          MSG.SEARCH_PAGES,
+          { query, limit: 8 }
+        );
+        setResults(response.success && response.data ? response.data : []);
         setSelectedIndex(0);
       } catch {
         setResults([]);
@@ -101,15 +120,18 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   }, [results, selectedIndex, onClose]);
 
   const navigateToResult = useCallback((result: SearchResult) => {
-    // Try to find existing tab with this URL
+    const targetUrl = buildTextFragmentUrl(result.url, result.chunkText);
+
+    // Try to find existing tab with the base URL
     chrome.tabs.query({ url: result.url }, (tabs) => {
       if (tabs.length > 0 && tabs[0].id) {
-        chrome.tabs.update(tabs[0].id, { active: true });
+        // Navigate existing tab to the fragment URL to trigger highlight
+        chrome.tabs.update(tabs[0].id, { active: true, url: targetUrl });
         if (tabs[0].windowId) {
           chrome.windows.update(tabs[0].windowId, { focused: true });
         }
       } else {
-        chrome.tabs.create({ url: result.url });
+        chrome.tabs.create({ url: targetUrl });
       }
     });
     onClose();
@@ -191,9 +213,9 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                 <span className="text-[11px] text-text-tertiary truncate block mt-0.5">
                   {result.url.replace(/^https?:\/\//, '').slice(0, 60)}
                 </span>
-                {result.description && (
-                  <span className="text-[10px] text-text-tertiary/70 truncate block mt-0.5">
-                    {result.description.slice(0, 80)}
+                {result.chunkText && (
+                  <span className="text-[10px] text-accent-primary/60 truncate block mt-0.5 italic">
+                    “{result.chunkText.slice(0, 80)}…”
                   </span>
                 )}
               </div>

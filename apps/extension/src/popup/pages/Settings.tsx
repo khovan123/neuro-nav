@@ -22,6 +22,8 @@ export function Settings() {
   const [settings, setSettings] = useState<StoredSettings>(DEFAULTS);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   // Load from chrome.storage
   useEffect(() => {
@@ -71,6 +73,81 @@ export function Settings() {
       },
     );
   }, [settings]);
+
+  const handleResetData = useCallback(async () => {
+    const confirmed = window.confirm(
+      '⚠️ WARNING: This will permanently delete:\n\n' +
+      '• All search index data (semantic chunks & vectors)\n' +
+      '• Browsing history\n' +
+      '• Saved workspaces\n' +
+      '• Tab stash entries\n\n' +
+      'Your branches will be preserved.\n\n' +
+      'This action cannot be undone. Continue?'
+    );
+    if (!confirmed) return;
+
+    setResetting(true);
+    try {
+      // 1. Clear search index IDB (neuro-nav-search)
+      await new Promise<void>((resolve, reject) => {
+        const req = indexedDB.open('neuro-nav-search', 2);
+        req.onsuccess = () => {
+          const db = req.result;
+          if (db.objectStoreNames.contains('chunks')) {
+            const tx = db.transaction('chunks', 'readwrite');
+            tx.objectStore('chunks').clear();
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+          } else {
+            db.close();
+            resolve();
+          }
+        };
+        req.onerror = () => reject(req.error);
+      });
+
+      // 2. Clear main IDB stores EXCEPT branches (neuro-nav)
+      await new Promise<void>((resolve, reject) => {
+        const req = indexedDB.open('neuro-nav', 1);
+        req.onsuccess = () => {
+          const db = req.result;
+          const storesToClear = ['workspaces', 'stash', 'history'].filter(
+            (s) => db.objectStoreNames.contains(s)
+          );
+          if (storesToClear.length === 0) { db.close(); resolve(); return; }
+          const tx = db.transaction(storesToClear, 'readwrite');
+          for (const name of storesToClear) {
+            tx.objectStore(name).clear();
+          }
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(tx.error); };
+        };
+        req.onerror = () => reject(req.error);
+      });
+
+      // 3. Clear chrome.storage.local (except secrets & branch data)
+      const all = await chrome.storage.local.get(null);
+      const preserved: Record<string, unknown> = {};
+      for (const key of ['navSecret', 'navDaemonUrl', 'navDaemonPort']) {
+        if (all[key] !== undefined) preserved[key] = all[key];
+      }
+      for (const key of Object.keys(all)) {
+        if (key.startsWith('branch_') || key === 'activeBranches') {
+          preserved[key] = all[key];
+        }
+      }
+      await chrome.storage.local.clear();
+      await chrome.storage.local.set(preserved);
+
+      setResetDone(true);
+      setTimeout(() => setResetDone(false), 3000);
+    } catch (err) {
+      console.error('[Neuro-Nav] Reset failed:', err);
+      setError('Reset failed. Check console for details.');
+    } finally {
+      setResetting(false);
+    }
+  }, []);
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar">
@@ -133,7 +210,7 @@ export function Settings() {
 
         {/* Error */}
         {error && (
-          <p className="text-[11px] text-red-400 flex items-center gap-1 px-1">
+          <p className="text-[11px] text-accent-danger flex items-center gap-1 px-1">
             <IconAlertTriangle size={12} /> {error}
           </p>
         )}
@@ -152,6 +229,26 @@ export function Settings() {
             'Save Changes'
           )}
         </button>
+
+        {/* Danger Zone: Reset Data */}
+        <section className="glass-panel p-4 space-y-2.5 border border-accent-danger/20">
+          <div className="flex items-center gap-2">
+            <IconAlertTriangle size={15} className="text-accent-danger" />
+            <h2 className="text-xs font-semibold text-accent-danger">Danger Zone</h2>
+          </div>
+          <p className="text-[10px] text-text-tertiary leading-relaxed">
+            Clear search index, history, workspaces & stash.
+            <span className="text-accent-primary"> Branches will be preserved.</span>
+          </p>
+          <button
+            id="reset-data-btn"
+            onClick={handleResetData}
+            disabled={resetting}
+            className="w-full py-2 bg-accent-danger/10 text-accent-danger text-xs font-semibold rounded-lg border border-accent-danger/20 hover:bg-accent-danger/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          >
+            {resetting ? 'Resetting...' : resetDone ? <><IconCheck size={12} /> Done</> : 'Reset All Data'}
+          </button>
+        </section>
 
         {/* Footer hint */}
         <p className="text-[10px] text-text-tertiary text-center leading-snug">

@@ -6,8 +6,9 @@ import { createMessageRouter, MSG } from '@/shared/messaging';
 import { pruneOldRecords, getAllWorkspaces, getActiveBranchForWindow, saveWorkspace } from '@/infrastructure/db/database';
 import * as branchOps from '@/core/use-cases/manageBranches';
 import * as stashOps from '@/core/use-cases/stashMemory';
-import { processExtractedPage } from '@/core/use-cases/pageIndexer';
-import { searchPages, getIndexCount, pruneOldPages, indexPage } from '@/infrastructure/search/searchIndex';
+import { processExtractedChunks } from '@/core/use-cases/pageIndexer';
+import { searchPages, getIndexCount, pruneOldPages, indexChunk } from '@/infrastructure/search/searchIndex';
+import { makeChunkId } from '@/core/entities/ChunkDocument';
 import { shouldBlock } from '@/core/use-cases/intentBlocker';
 import { recordPageVisit, recordNavigation, getGraphData } from '@/core/use-cases/graphBuilder';
 import { classifyPage } from '@/core/entities/PageDocument';
@@ -127,9 +128,13 @@ const router = createMessageRouter({
 
   // ---- Search & indexing handlers (Phase 3) ----
 
-  [MSG.SEARCH_PAGES]: async (payload) => {
+  [MSG.SEARCH_PAGES]: async (payload, sender) => {
     const { query, limit } = payload as { query: string; limit?: number };
-    const results = await searchPages(query, limit);
+    // Resolve the active branch for the requesting window
+    const windowId = sender.tab?.windowId ?? (await chrome.windows.getLastFocused()).id!;
+    const branch = await getActiveBranchForWindow(windowId);
+    const branchName = branch?.name ?? 'default';
+    const results = await searchPages(query, limit, branchName);
     return { success: true, data: results };
   },
 
@@ -150,15 +155,25 @@ chrome.runtime.onMessage.addListener(router);
 
 // ---- Content Script Listener (raw messages, not routed) ----
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PAGE_CONTENT_EXTRACTED') {
-    processExtractedPage(message.payload)
-      .then((doc) => {
-        console.log(`[Neuro-Nav] Indexed: ${doc.title} [${doc.category}]`);
+    // Resolve branch from the sender tab's window
+    const windowId = sender.tab?.windowId;
+    const branchPromise = windowId
+      ? getActiveBranchForWindow(windowId)
+      : Promise.resolve(null);
+
+    branchPromise
+      .then((branch) => {
+        const branchName = branch?.name ?? 'default';
+        return processExtractedChunks(message.payload, branchName);
+      })
+      .then((count) => {
+        console.log(`[Neuro-Nav] Indexed ${count} chunks from: ${message.payload.title}`);
         sendResponse({ success: true });
       })
       .catch((err) => {
-        console.error('[Neuro-Nav] Indexing failed:', err);
+        console.error('[Neuro-Nav] Chunk indexing failed:', err);
         sendResponse({ success: false });
       });
     return true; // keep channel open
@@ -367,15 +382,22 @@ async function handleProjectContextUpdate(ctx: ProjectContext): Promise<void> {
   // 1. Save to chrome.storage.local for popup to read
   await chrome.storage.local.set({ projectContext: ctx });
 
-  // 2. Inject doc URLs into Orama search index
+  // 2. Inject doc URLs into Orama search index as synthetic chunks
+  //    Tag with the last-focused window's branch for context scoping
+  const lastWindow = await chrome.windows.getLastFocused();
+  const activeBranch = await getActiveBranchForWindow(lastWindow.id!);
+  const branchTag = activeBranch?.name ?? 'default';
+
   for (const tech of ctx.techStack) {
     if (!tech.docUrl) continue;
-    await indexPage({
+    await indexChunk({
+      id: makeChunkId(tech.docUrl, 0),
       url: tech.docUrl,
       title: `${tech.name} Documentation`,
-      description: `Official docs for ${tech.name}${tech.version ? ` v${tech.version}` : ''} (${tech.category})`,
       favicon: '',
-      text: `${tech.name} ${tech.category} documentation reference local project`,
+      branch: branchTag,
+      chunkText: `${tech.name} ${tech.category} documentation reference local project${tech.version ? ` v${tech.version}` : ''}`,
+      chunkIndex: 0,
       category: 'docs',
       extractedAt: Date.now(),
     });

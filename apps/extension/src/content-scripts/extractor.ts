@@ -1,7 +1,8 @@
 /* ============================================================
    CONTENT SCRIPT — DOM Text Extractor with 15s dwell timer
    Extracts main text content from pages after the user dwells
-   for 15 seconds, sending it to the background SW for indexing.
+   for 15 seconds, chunks it with a sliding window, and sends
+   the chunks to the background SW for semantic indexing.
    ============================================================ */
 
 (() => {
@@ -36,7 +37,41 @@
       .replace(/\s+/g, ' ')           // Collapse whitespace
       .replace(/\n{3,}/g, '\n\n')     // Max 2 newlines
       .trim()
-      .slice(0, 10_000);              // Cap at 10k chars for embedding
+      .slice(0, 10_000);              // Cap at 10k chars
+  }
+
+  /**
+   * Sliding Window Chunker — splits text into overlapping segments.
+   * Each chunk is ~chunkSize chars with `overlap` chars of overlap
+   * to preserve context across chunk boundaries.
+   */
+  function chunkText(
+    text: string,
+    chunkSize = 1000,
+    overlap = 200
+  ): { text: string; index: number }[] {
+    if (text.length <= chunkSize) {
+      return [{ text, index: 0 }];
+    }
+
+    const chunks: { text: string; index: number }[] = [];
+    let offset = 0;
+    let index = 0;
+    const step = chunkSize - overlap;
+
+    while (offset < text.length) {
+      const end = Math.min(offset + chunkSize, text.length);
+      chunks.push({ text: text.slice(offset, end), index });
+      offset += step;
+      index++;
+      // Avoid creating a tiny trailing chunk (< 100 chars)
+      if (offset < text.length && text.length - offset < 100) {
+        chunks.push({ text: text.slice(offset), index });
+        break;
+      }
+    }
+
+    return chunks;
   }
 
   /** Extract metadata from the page. */
@@ -68,11 +103,13 @@
         // will be injected on next navigation.
         if (!chrome.runtime?.id) return;
 
+        const chunks = chunkText(text);
+
         chrome.runtime.sendMessage({
           type: 'PAGE_CONTENT_EXTRACTED',
           payload: {
             ...metadata,
-            text,
+            chunks,
             extractedAt: Date.now(),
           },
         }).catch(() => {

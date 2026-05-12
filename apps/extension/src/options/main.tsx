@@ -6,6 +6,8 @@ import '@/index.css';
 function OptionsApp() {
   const [token, setToken] = useState('');
   const [saved, setSaved] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   useEffect(() => {
     chrome.storage.local.get(['navSecret'], (result) => {
@@ -19,6 +21,83 @@ function OptionsApp() {
       setTimeout(() => setSaved(false), 2000);
     });
   }, [token]);
+
+  const handleResetData = useCallback(async () => {
+    const confirmed = window.confirm(
+      '⚠️ WARNING: This will permanently delete:\n\n' +
+      '• All search index data (semantic chunks & vectors)\n' +
+      '• Browsing history\n' +
+      '• Saved workspaces\n' +
+      '• Tab stash entries\n\n' +
+      'Your branches will be preserved.\n\n' +
+      'This action cannot be undone. Continue?'
+    );
+    if (!confirmed) return;
+
+    setResetting(true);
+    try {
+      // 1. Clear search index IDB (neuro-nav-search)
+      await new Promise<void>((resolve, reject) => {
+        const req = indexedDB.open('neuro-nav-search', 2);
+        req.onsuccess = () => {
+          const db = req.result;
+          if (db.objectStoreNames.contains('chunks')) {
+            const tx = db.transaction('chunks', 'readwrite');
+            tx.objectStore('chunks').clear();
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+          } else {
+            db.close();
+            resolve();
+          }
+        };
+        req.onerror = () => reject(req.error);
+      });
+
+      // 2. Clear main IDB stores EXCEPT branches (neuro-nav)
+      await new Promise<void>((resolve, reject) => {
+        const req = indexedDB.open('neuro-nav', 1);
+        req.onsuccess = () => {
+          const db = req.result;
+          const storesToClear = ['workspaces', 'stash', 'history'].filter(
+            (s) => db.objectStoreNames.contains(s)
+          );
+          if (storesToClear.length === 0) { db.close(); resolve(); return; }
+          const tx = db.transaction(storesToClear, 'readwrite');
+          for (const name of storesToClear) {
+            tx.objectStore(name).clear();
+          }
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(tx.error); };
+        };
+        req.onerror = () => reject(req.error);
+      });
+
+      // 3. Clear chrome.storage.local (except navSecret & branch data)
+      const keysToPreserve = ['navSecret'];
+      const all = await chrome.storage.local.get(null);
+      const preserved: Record<string, unknown> = {};
+      for (const key of keysToPreserve) {
+        if (all[key] !== undefined) preserved[key] = all[key];
+      }
+      // Also preserve any branch-related keys
+      for (const key of Object.keys(all)) {
+        if (key.startsWith('branch_') || key === 'activeBranches') {
+          preserved[key] = all[key];
+        }
+      }
+      await chrome.storage.local.clear();
+      await chrome.storage.local.set(preserved);
+
+      setResetDone(true);
+      setTimeout(() => setResetDone(false), 3000);
+    } catch (err) {
+      console.error('[Neuro-Nav] Reset failed:', err);
+      alert('Reset failed. Check console for details.');
+    } finally {
+      setResetting(false);
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-surface-base p-8">
@@ -58,7 +137,7 @@ function OptionsApp() {
           </div>
         </div>
 
-        <div className="glass-panel p-6">
+        <div className="glass-panel p-6 mb-4">
           <h2 className="text-sm font-semibold text-text-primary mb-4">Security</h2>
 
           <div className="space-y-3">
@@ -85,6 +164,28 @@ function OptionsApp() {
             <p className="text-xs text-text-tertiary">
               After saving, reload the extension to apply the new token.
             </p>
+          </div>
+        </div>
+
+        <div className="glass-panel p-6 border border-accent-danger/20">
+          <h2 className="text-sm font-semibold text-accent-danger mb-4">Danger Zone</h2>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-text-primary">Reset All Data</p>
+              <p className="text-xs text-text-tertiary">
+                Clear search index, history, workspaces & stash.
+                <span className="text-accent-primary"> Branches will be preserved.</span>
+              </p>
+            </div>
+            <button
+              id="reset-data-btn"
+              onClick={handleResetData}
+              disabled={resetting}
+              className="px-4 py-1.5 bg-accent-danger/20 text-accent-danger text-sm font-medium rounded-md border border-accent-danger/30 hover:bg-accent-danger/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {resetting ? 'Resetting...' : resetDone ? '✓ Done' : 'Reset Data'}
+            </button>
           </div>
         </div>
       </div>

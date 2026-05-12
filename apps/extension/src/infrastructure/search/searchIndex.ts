@@ -1,24 +1,33 @@
 /* ============================================================
-   SEARCH INDEX — Orama-powered full-text + vector search
-   Stores PageDocuments in IndexedDB and indexes them in Orama.
+   SEARCH INDEX — Orama-powered full-text + vector hybrid search
+   Stores ChunkDocuments in IndexedDB and indexes them in Orama.
+   Phase 4: Semantic search via 384-dim embeddings.
    ============================================================ */
 
 import { create, insert, search, remove, count, type AnyOrama } from '@orama/orama';
-import type { PageDocument } from '@/core/entities/PageDocument';
+import type { ChunkDocument } from '@/core/entities/ChunkDocument';
+import { embed, isReady } from '@/infrastructure/ai/embeddingService';
 
 const DB_NAME = 'neuro-nav-search';
-const STORE_NAME = 'pages';
-const DB_VERSION = 1;
+const STORE_NAME = 'chunks';  // Was 'pages' in v1
+const DB_VERSION = 2;         // Bumped from 1 → 2 for chunk migration
 
 // ---- IndexedDB Persistence ----
 
 function openIDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
+    req.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+
+      // Wipe old 'pages' store from v1 — data will be re-crawled naturally
+      if (db.objectStoreNames.contains('pages')) {
+        db.deleteObjectStore('pages');
+      }
+
+      // Create new chunks store with composite keyPath
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'url' });
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -26,10 +35,10 @@ function openIDB(): Promise<IDBDatabase> {
   });
 }
 
-async function persistDoc(doc: PageDocument): Promise<void> {
+async function persistChunk(chunk: ChunkDocument): Promise<void> {
   const db = await openIDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
-  tx.objectStore(STORE_NAME).put(doc);
+  tx.objectStore(STORE_NAME).put(chunk);
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -37,23 +46,43 @@ async function persistDoc(doc: PageDocument): Promise<void> {
   db.close();
 }
 
-async function loadAllDocs(): Promise<PageDocument[]> {
+async function loadAllChunks(): Promise<ChunkDocument[]> {
   const db = await openIDB();
   const tx = db.transaction(STORE_NAME, 'readonly');
   const req = tx.objectStore(STORE_NAME).getAll();
-  return new Promise<PageDocument[]>((resolve, reject) => {
-    req.onsuccess = () => { db.close(); resolve(req.result as PageDocument[]); };
+  return new Promise<ChunkDocument[]>((resolve, reject) => {
+    req.onsuccess = () => { db.close(); resolve(req.result as ChunkDocument[]); };
     req.onerror = () => { db.close(); reject(req.error); };
   });
 }
 
-async function removeDocFromIDB(url: string): Promise<void> {
+async function removeChunkFromIDB(id: string): Promise<void> {
   const db = await openIDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
-  tx.objectStore(STORE_NAME).delete(url);
+  tx.objectStore(STORE_NAME).delete(id);
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function removeChunksByUrl(url: string): Promise<void> {
+  const db = await openIDB();
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const store = tx.objectStore(STORE_NAME);
+  const req = store.getAll();
+  await new Promise<void>((resolve, reject) => {
+    req.onsuccess = () => {
+      const chunks = req.result as ChunkDocument[];
+      for (const chunk of chunks) {
+        if (chunk.url === url) {
+          store.delete(chunk.id);
+        }
+      }
+      tx.oncomplete = () => resolve();
+    };
+    req.onerror = () => reject(req.error);
   });
   db.close();
 }
@@ -67,37 +96,43 @@ async function getIndex(): Promise<AnyOrama> {
 
   oramaInstance = await create({
     schema: {
+      id: 'string',
       url: 'string',
       title: 'string',
-      description: 'string',
-      text: 'string',
+      chunkText: 'string',
+      chunkIndex: 'number',
       category: 'string',
+      branch: 'string',
+      embedding: 'vector[384]',
       extractedAt: 'number',
     } as const,
   });
 
   // Hydrate from IndexedDB
   try {
-    let docs = await loadAllDocs();
-    
-    // Memory Limit Optimization: Keep only the most recent 5,000 pages in RAM
-    const MAX_PAGES = 5000;
-    if (docs.length > MAX_PAGES) {
-      docs.sort((a, b) => b.extractedAt - a.extractedAt);
-      docs = docs.slice(0, MAX_PAGES);
+    let chunks = await loadAllChunks();
+
+    // Memory Limit: Keep only the most recent 10,000 chunks in RAM
+    const MAX_CHUNKS = 10_000;
+    if (chunks.length > MAX_CHUNKS) {
+      chunks.sort((a, b) => b.extractedAt - a.extractedAt);
+      chunks = chunks.slice(0, MAX_CHUNKS);
     }
 
-    for (const doc of docs) {
+    for (const chunk of chunks) {
       await insert(oramaInstance, {
-        url: doc.url,
-        title: doc.title,
-        description: doc.description,
-        text: doc.text.slice(0, 2000), // Orama text index — keep manageable
-        category: doc.category,
-        extractedAt: doc.extractedAt,
+        id: chunk.id,
+        url: chunk.url,
+        title: chunk.title,
+        chunkText: chunk.chunkText.slice(0, 2000),
+        chunkIndex: chunk.chunkIndex,
+        category: chunk.category,
+        branch: chunk.branch ?? 'default',
+        embedding: chunk.embedding ?? new Array(384).fill(0),
+        extractedAt: chunk.extractedAt,
       });
     }
-    console.log(`[SearchIndex] Loaded ${docs.length} documents from cache`);
+    console.log(`[SearchIndex] Loaded ${chunks.length} chunks from cache`);
   } catch (err) {
     console.error('[SearchIndex] Hydration failed:', err);
   }
@@ -108,45 +143,50 @@ async function getIndex(): Promise<AnyOrama> {
 // ---- Public API ----
 
 export interface SearchResult {
+  /** Composite chunk ID */
+  id: string;
   url: string;
   title: string;
-  description: string;
+  /** Chunk text for Text Fragments highlight */
+  chunkText: string;
   category: string;
   score: number;
 }
 
 /**
- * Index a page document (upserts by URL).
+ * Index a chunk document (upserts by ID).
  */
-export async function indexPage(doc: PageDocument): Promise<void> {
+export async function indexChunk(chunk: ChunkDocument): Promise<void> {
   // Persist to IndexedDB first
-  await persistDoc(doc);
+  await persistChunk(chunk);
 
   const idx = await getIndex();
 
   // Remove existing entry if updating
   try {
-    const existing = await search(idx, { term: doc.url, properties: ['url'], limit: 1 });
+    const existing = await search(idx, { term: chunk.id, properties: ['id'], limit: 1 });
     if (existing.hits.length > 0) {
       await remove(idx, existing.hits[0].id);
     }
   } catch {
-    // Not found — that's fine
+    // Not found — fine
   }
 
   await insert(idx, {
-    url: doc.url,
-    title: doc.title,
-    description: doc.description,
-    text: doc.text.slice(0, 2000),
-    category: doc.category,
-    extractedAt: doc.extractedAt,
+    id: chunk.id,
+    url: chunk.url,
+    title: chunk.title,
+    chunkText: chunk.chunkText.slice(0, 2000),
+    chunkIndex: chunk.chunkIndex,
+    category: chunk.category,
+    branch: chunk.branch ?? 'default',
+    embedding: chunk.embedding ?? new Array(384).fill(0),
+    extractedAt: chunk.extractedAt,
   });
 }
 
 /**
  * Common English stop words that add noise to search results.
- * These appear in nearly every page and dilute relevance scoring.
  */
 const STOP_WORDS = new Set([
   'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
@@ -172,53 +212,103 @@ function extractKeyTerms(query: string): string {
 }
 
 /**
- * Full-text search across all indexed pages.
+ * Hybrid search: combines full-text + vector cosine similarity.
+ * Results are scoped to the specified branch to prevent context leaks.
+ * Falls back to pure lexical search if embeddings are unavailable.
  */
-export async function searchPages(query: string, limit = 10): Promise<SearchResult[]> {
+export async function searchPages(query: string, limit = 10, branchName?: string): Promise<SearchResult[]> {
   const idx = await getIndex();
-
-  // Strip stop words to focus on meaningful terms
   const cleanQuery = extractKeyTerms(query);
 
+  // Branch filter — only search within the active branch context
+  const whereClause = branchName ? { branch: branchName } : undefined;
+
+  // Try hybrid search if AI model is ready
+  if (isReady()) {
+    try {
+      const queryVector = await embed(query);
+      const results = await search(idx, {
+        term: cleanQuery,
+        properties: ['title', 'chunkText'],
+        vector: {
+          value: queryVector,
+          property: 'embedding',
+        },
+        mode: 'hybrid',
+        where: whereClause,
+        limit: limit * 2,
+        boost: { title: 3, chunkText: 1 },
+      });
+
+      if (results.hits.length > 0) {
+        return deduplicateByUrl(results.hits, limit);
+      }
+    } catch (err) {
+      console.warn('[SearchIndex] Hybrid search failed, falling back to lexical:', err);
+    }
+  }
+
+  // Fallback: pure lexical search
   const results = await search(idx, {
     term: cleanQuery,
-    properties: ['title', 'text', 'description'],
-    limit: limit * 2,      // Fetch more, filter below
-    tolerance: 0,           // Exact match only (no fuzzy)
-    threshold: 0,           // 0 = ALL terms must match (strictest)
-    boost: { title: 5, description: 3, text: 1 },
+    properties: ['title', 'chunkText'],
+    where: whereClause,
+    limit: limit * 2,
+    tolerance: 0,
+    threshold: 0,
+    boost: { title: 5, chunkText: 1 },
   });
 
-  // If strict search returned nothing, fallback to lenient
   let hits = results.hits;
   if (hits.length === 0) {
     const fallback = await search(idx, {
       term: cleanQuery,
-      properties: ['title', 'text', 'description'],
+      properties: ['title', 'chunkText'],
+      where: whereClause,
       limit,
       tolerance: 1,
-      threshold: 0.3,       // At least 30% of terms must match
-      boost: { title: 5, description: 3, text: 1 },
+      threshold: 0.3,
+      boost: { title: 5, chunkText: 1 },
     });
     hits = fallback.hits;
   }
 
-  // Cut off low-relevance results: drop anything below 10% of top score
-  const topScore = hits.length > 0 ? hits[0].score : 0;
-  const cutoff = topScore * 0.1;
-  const filtered = hits.filter((h) => h.score >= cutoff).slice(0, limit);
-
-  return filtered.map((hit) => ({
-    url: (hit.document as Record<string, unknown>).url as string,
-    title: (hit.document as Record<string, unknown>).title as string,
-    description: (hit.document as Record<string, unknown>).description as string,
-    category: (hit.document as Record<string, unknown>).category as string,
-    score: hit.score,
-  }));
+  return deduplicateByUrl(hits, limit);
 }
 
 /**
- * Get total count of indexed documents.
+ * Deduplicate results by URL — keep only the best-scoring chunk per page.
+ * This prevents the same page from appearing multiple times in results.
+ */
+function deduplicateByUrl(
+  hits: { id: string | number; score: number; document: Record<string, unknown> }[],
+  limit: number
+): SearchResult[] {
+  const seen = new Map<string, SearchResult>();
+
+  for (const hit of hits) {
+    const doc = hit.document as Record<string, unknown>;
+    const url = doc.url as string;
+
+    if (!seen.has(url) || hit.score > seen.get(url)!.score) {
+      seen.set(url, {
+        id: doc.id as string,
+        url,
+        title: doc.title as string,
+        chunkText: doc.chunkText as string,
+        category: doc.category as string,
+        score: hit.score,
+      });
+    }
+  }
+
+  return Array.from(seen.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+/**
+ * Get total count of indexed chunks.
  */
 export async function getIndexCount(): Promise<number> {
   const idx = await getIndex();
@@ -226,42 +316,39 @@ export async function getIndexCount(): Promise<number> {
 }
 
 /**
- * Remove a document by URL.
+ * Remove all chunks for a URL.
  */
 export async function removeFromIndex(url: string): Promise<void> {
-  await removeDocFromIDB(url);
+  await removeChunksByUrl(url);
   const idx = await getIndex();
-  const existing = await search(idx, { term: url, properties: ['url'], limit: 1 });
-  if (existing.hits.length > 0) {
-    await remove(idx, existing.hits[0].id);
+  // Remove all Orama entries matching this URL
+  const existing = await search(idx, { term: url, properties: ['url'], limit: 50 });
+  for (const hit of existing.hits) {
+    await remove(idx, hit.id);
   }
 }
 
 /**
- * Prune indexed pages older than the specified number of days.
+ * Prune indexed chunks older than the specified number of days.
  */
 export async function pruneOldPages(maxAgeDays = 30): Promise<number> {
   const db = await openIDB();
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const store = tx.objectStore(STORE_NAME);
-  
+
   const req = store.getAll();
   return new Promise<number>((resolve, reject) => {
     req.onsuccess = async () => {
-      const docs = req.result as PageDocument[];
+      const chunks = req.result as ChunkDocument[];
       let deleted = 0;
-      for (const doc of docs) {
-        if (doc.extractedAt < cutoff) {
-          store.delete(doc.url);
+      for (const chunk of chunks) {
+        if (chunk.extractedAt < cutoff) {
+          store.delete(chunk.id);
           deleted++;
         }
       }
-      
-      // We don't bother removing from Orama in-memory instance because 
-      // on next startup, Orama will only hydrate the remaining items,
-      // and typically pruning runs in background where Orama might not even be fully hydrated.
-      
+
       tx.oncomplete = () => {
         db.close();
         resolve(deleted);
