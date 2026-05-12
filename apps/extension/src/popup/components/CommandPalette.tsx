@@ -161,7 +161,9 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             </div>
           )}
 
-          {results.map((result, i) => (
+          {(() => {
+            const maxScore = Math.max(...results.map(r => r.score), 1);
+            return results.map((result, i) => (
             <button
               key={result.url}
               className={[
@@ -196,10 +198,11 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                 )}
               </div>
               <span className="text-[10px] text-text-tertiary font-mono shrink-0 mt-0.5">
-                {(result.score * 100).toFixed(0)}%
+                {Math.round((result.score / maxScore) * 100)}%
               </span>
             </button>
-          ))}
+            ));
+          })()}
         </div>
 
         {/* Footer */}

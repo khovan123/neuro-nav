@@ -153,6 +153,8 @@ export async function searchPages(query: string, limit = 10): Promise<SearchResu
     term: query,
     properties: ['title', 'text', 'description', 'url'],
     limit,
+    tolerance: 1,       // Allow 1-char typo per term
+    threshold: 1,       // 1 = return all partial matches (most lenient)
     boost: { title: 3, description: 2, text: 1 },
   });
 

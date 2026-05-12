@@ -63,6 +63,11 @@
 
         const metadata = extractMetadata();
 
+        // Guard: chrome.runtime becomes undefined when extension context is invalidated
+        // (e.g. after extension reload/update). Fail silently — the new content script
+        // will be injected on next navigation.
+        if (!chrome.runtime?.id) return;
+
         chrome.runtime.sendMessage({
           type: 'PAGE_CONTENT_EXTRACTED',
           payload: {
@@ -74,6 +79,8 @@
           // Background may not be listening yet — that's OK
         });
       } catch (err) {
+        // Silently ignore if extension context invalidated
+        if (String(err).includes('Extension context invalidated')) return;
         console.error('[Neuro-Nav] Extraction failed:', err);
       }
     };
