@@ -1,9 +1,12 @@
 {
   "name": "@neuro-nav/server",
   "version": "3.0.0",
-  "private": true,
+  "description": "Local WebSocket daemon that bridges the Neuro-Nav CLI with the browser extension",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "nav-daemon": "dist/index.js"
+  },
   "scripts": {
     "dev": "node --watch src/index.ts",
     "build": "tsc",
@@ -16,5 +19,7 @@
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.0",
     "typescript": "~5.8.3"
-  }
+  },
+  "keywords": ["neuro-nav", "websocket", "browser-extension", "daemon"],
+  "license": "MIT"
 }

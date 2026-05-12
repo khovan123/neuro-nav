@@ -124,6 +124,92 @@ Dữ liệu của bạn, nằm trên máy của bạn.
 
 ---
 
+## 🖥️ CLI Bridge (lệnh `nav`)
+
+Điều khiển trình duyệt từ terminal. CLI sẽ **tự động khởi động daemon** nền — không cần cấu hình thủ công.
+
+### Kiến trúc
+
+```
+Terminal (nav-cli)  ── WebSocket ──→  nav-daemon (:9500)  ←── WebSocket ──  Chrome Extension
+                    ── HTTP POST ──→  nav-daemon (:9498)
+```
+
+> **Toàn bộ giao tiếp chỉ diễn ra trên máy cục bộ** (`127.0.0.1`). Không có dữ liệu nào rời khỏi máy bạn.
+
+### Cài đặt
+
+```bash
+npm install -g @neuro-nav/cli
+```
+
+Chỉ cần vậy thôi. Lệnh `nav` giờ đã khả dụng toàn cục. Daemon nền (`@neuro-nav/server`) được bao gồm như dependency và khởi động tự động.
+
+<details>
+<summary>Dành cho developer (monorepo)</summary>
+
+```bash
+cd packages/nav-cli
+npm link
+```
+</details>
+
+### Bảng lệnh
+
+Chạy `nav help` để xem toàn bộ các lệnh khả dụng:
+
+| Lệnh | Mô tả |
+| :--- | :--- |
+| `nav help` | Hiển thị toàn bộ lệnh khả dụng |
+| `nav checkout <tên>` | Chuyển nhánh trình duyệt (viết tắt) |
+| `nav branch list` | Liệt kê tất cả các nhánh đã lưu |
+| `nav branch checkout <tên>` | Chuyển sang một nhánh |
+| `nav branch create <tên>` | Tạo và kích hoạt nhánh mới |
+| `nav branch delete <id>` | Xóa nhánh theo ID |
+| `nav workspace list` | Liệt kê tất cả workspace đã lưu |
+| `nav stash` | Cất toàn bộ tab hiện tại vào bộ nhớ tạm |
+| `nav stash pop` | Khôi phục stash gần nhất |
+| `nav stash list` | Xem danh sách các stash |
+| `nav search <từ khóa>` | Tìm kiếm ngữ nghĩa các trang đã index |
+| `nav status` | Kiểm tra kết nối daemon & extension |
+| `nav ping` | Test kết nối nhanh |
+
+### Ví dụ sử dụng
+
+```bash
+# Chuyển ngữ cảnh trình duyệt sang nhánh feature
+nav checkout feat/auth-system
+
+# Cất tab hiện tại và bắt đầu mới
+nav stash
+nav branch create feat/new-api
+
+# Tìm lại trang bạn đọc tuần trước
+nav search "kubernetes helm values"
+
+# Kiểm tra hệ thống đã kết nối chưa
+nav status
+# → Daemon:    ● Đang chạy
+# → Extension: ● Đã kết nối
+```
+
+### Biến môi trường
+
+| Biến | Mặc định | Mô tả |
+| :--- | :--- | :--- |
+| `NAV_SERVER` | `ws://127.0.0.1:9500` | URL WebSocket cho nav-daemon |
+| `NAV_HTTP` | `http://127.0.0.1:9498` | URL HTTP cho nav-daemon |
+
+### Cơ chế hoạt động
+
+1. Bạn gõ `nav checkout feat/auth` trên terminal.
+2. CLI thử kết nối tới WebSocket daemon. Nếu daemon chưa chạy, CLI sẽ **tự động khởi động daemon** chạy nền.
+3. Daemon chuyển tiếp lệnh tới Service Worker của Chrome Extension.
+4. Extension lưu lại các tab hiện tại, mở các tab của nhánh mới, và gửi phản hồi thành công qua cùng kênh liên lạc.
+5. Daemon tự tắt sau **10 phút** không hoạt động để tiết kiệm tài nguyên.
+
+---
+
 <div align="center">
   <sub>Được thiết kế với 💜 dành cho những người thợ xây dựng tương lai.</sub>
 </div>

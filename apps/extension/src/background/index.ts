@@ -291,6 +291,179 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   lastTabUrl.delete(tabId);
 });
 
+// ---- CLI Bridge (WebSocket Client → nav-server) ----
+
+const CLI_SERVER_URL = 'ws://127.0.0.1:9500';
+const CLI_RECONNECT_MS = 5_000;
+
+/** Handlers for CLI commands — reuses the same logic as the popup message router. */
+const cliCommandHandlers: Record<string, (payload: unknown) => Promise<unknown>> = {
+  PING: async () => ({ success: true, data: 'pong' }),
+  TABS_GET_ALL: async () => {
+    const tabs = await chrome.tabs.query({});
+    return { success: true, data: tabs };
+  },
+  BRANCH_LIST: async () => {
+    const branches = await branchOps.listBranches();
+    return { success: true, data: branches };
+  },
+  BRANCH_CHECKOUT: async (payload) => {
+    const { name } = payload as { name: string };
+    const currentTabs = (await chrome.tabs.query({ currentWindow: true }))
+      .map(fromChromeTab).map(toSnapshot);
+    const result = await branchOps.checkoutBranch(name, currentTabs);
+
+    const currentWindow = await chrome.windows.getCurrent();
+    const existingTabs = await chrome.tabs.query({ windowId: currentWindow.id });
+
+    for (const tab of result.tabsToOpen) {
+      await chrome.tabs.create({ windowId: currentWindow.id, url: tab.url, pinned: tab.pinned });
+    }
+    if (result.tabsToOpen.length > 0) {
+      for (const tab of existingTabs) {
+        if (tab.id) chrome.tabs.remove(tab.id);
+      }
+    }
+    return { success: true, data: result.branch };
+  },
+  BRANCH_CREATE: async (payload) => {
+    const { name } = payload as { name: string };
+    const currentTabs = (await chrome.tabs.query({ currentWindow: true }))
+      .map(fromChromeTab).map(toSnapshot);
+    const branch = await branchOps.createNewBranch(name, currentTabs, true);
+    return { success: true, data: branch };
+  },
+  BRANCH_DELETE: async (payload) => {
+    const { id } = payload as { id: string };
+    await branchOps.deleteBranchById(id);
+    return { success: true };
+  },
+  WORKSPACE_LIST: async () => {
+    const workspaces = await getAllWorkspaces();
+    return { success: true, data: workspaces };
+  },
+  STASH_PUSH: async () => {
+    const currentTabs = (await chrome.tabs.query({ currentWindow: true }))
+      .map(fromChromeTab).map(toSnapshot);
+    await stashOps.stashTabs(currentTabs);
+    return { success: true };
+  },
+  STASH_POP: async () => {
+    const entry = await stashOps.popStash();
+    if (!entry) return { success: false, error: 'Stash is empty' };
+    const currentWindow = await chrome.windows.getCurrent();
+    for (const tab of entry.tabs) {
+      await chrome.tabs.create({ windowId: currentWindow.id, url: tab.url, pinned: tab.pinned });
+    }
+    return { success: true, data: entry };
+  },
+  STASH_LIST: async () => {
+    const entries = await stashOps.listStash();
+    return { success: true, data: entries };
+  },
+  SEARCH_PAGES: async (payload) => {
+    const { query, limit } = payload as { query: string; limit?: number };
+    const results = await searchPages(query, limit);
+    return { success: true, data: results };
+  },
+  GRAPH_DATA: async () => {
+    const data = await getGraphData();
+    return { success: true, data };
+  },
+};
+
+let cliSocket: WebSocket | null = null;
+let cliReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function connectToCLIServer() {
+  // Don't reconnect if already connected or connecting
+  if (cliSocket && (cliSocket.readyState === WebSocket.OPEN || cliSocket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  try {
+    cliSocket = new WebSocket(CLI_SERVER_URL);
+  } catch {
+    scheduleReconnect();
+    return;
+  }
+
+  cliSocket.onopen = () => {
+    console.log('[Neuro-Nav] Connected to nav-server');
+    if (cliReconnectTimer) {
+      clearTimeout(cliReconnectTimer);
+      cliReconnectTimer = null;
+    }
+    // Identify as extension
+    cliSocket!.send(JSON.stringify({ source: 'extension', type: 'IDENTIFY' }));
+  };
+
+  cliSocket.onmessage = async (event) => {
+    let msg: { source?: string; type: string; payload?: unknown; requestId?: string };
+    try {
+      msg = JSON.parse(typeof event.data === 'string' ? event.data : event.data.toString());
+    } catch {
+      return;
+    }
+
+    // Ignore server ack
+    if (msg.type === 'CONNECTED') return;
+
+    // Dispatch to handler
+    const handler = cliCommandHandlers[msg.type];
+    if (!handler) {
+      cliSocket?.send(JSON.stringify({
+        source: 'extension',
+        type: 'RESPONSE',
+        requestId: msg.requestId,
+        success: false,
+        error: `Unknown command: ${msg.type}`,
+      }));
+      return;
+    }
+
+    try {
+      const result = await handler(msg.payload);
+      cliSocket?.send(JSON.stringify({
+        source: 'extension',
+        type: 'RESPONSE',
+        requestId: msg.requestId,
+        ...result as object,
+      }));
+    } catch (err) {
+      cliSocket?.send(JSON.stringify({
+        source: 'extension',
+        type: 'RESPONSE',
+        requestId: msg.requestId,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  };
+
+  cliSocket.onclose = () => {
+    console.log('[Neuro-Nav] Disconnected from nav-server');
+    cliSocket = null;
+    scheduleReconnect();
+  };
+
+  cliSocket.onerror = () => {
+    // onclose will fire after onerror — reconnect handled there
+    cliSocket?.close();
+  };
+}
+
+function scheduleReconnect() {
+  if (cliReconnectTimer) return;
+  cliReconnectTimer = setTimeout(() => {
+    cliReconnectTimer = null;
+    connectToCLIServer();
+  }, CLI_RECONNECT_MS);
+}
+
+// Start CLI bridge
+connectToCLIServer();
+
 // ---- Extension Install/Update ----
 
 chrome.runtime.onInstalled.addListener((details) => {

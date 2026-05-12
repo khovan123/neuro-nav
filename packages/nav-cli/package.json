@@ -1,6 +1,7 @@
 {
   "name": "@neuro-nav/cli",
   "version": "3.0.0",
+  "description": "Terminal interface for Neuro-Nav — control your browser from the command line",
   "type": "module",
   "bin": {
     "nav": "dist/index.js"
@@ -10,11 +11,14 @@
     "dev": "node --watch src/index.ts"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "@neuro-nav/server": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.0",
     "typescript": "~5.8.3"
-  }
+  },
+  "keywords": ["neuro-nav", "cli", "browser-extension", "tabs", "workspace"],
+  "license": "MIT"
 }

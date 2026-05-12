@@ -124,6 +124,92 @@ Your data stays on your machine.
 
 ---
 
+## 🖥️ CLI Bridge (`nav` command)
+
+Control your browser from the terminal. The CLI automatically starts the background daemon — no manual setup required.
+
+### Architecture
+
+```
+Terminal (nav-cli)  ── WebSocket ──→  nav-daemon (:9500)  ←── WebSocket ──  Chrome Extension
+                    ── HTTP POST ──→  nav-daemon (:9498)
+```
+
+> **All communication is local-only** (`127.0.0.1`). No data leaves your machine.
+
+### Installation
+
+```bash
+npm install -g @neuro-nav/cli
+```
+
+That's it. The `nav` command is now available globally. The background daemon (`@neuro-nav/server`) is included as a dependency and starts automatically.
+
+<details>
+<summary>For developers (monorepo)</summary>
+
+```bash
+cd packages/nav-cli
+npm link
+```
+</details>
+
+### Command Reference
+
+Run `nav help` to see all available commands:
+
+| Command | Description |
+| :--- | :--- |
+| `nav help` | Show all available commands |
+| `nav checkout <name>` | Switch to a browser branch (shorthand) |
+| `nav branch list` | List all saved branches |
+| `nav branch checkout <name>` | Switch to a branch |
+| `nav branch create <name>` | Create and activate a new branch |
+| `nav branch delete <id>` | Delete a branch by ID |
+| `nav workspace list` | List all saved workspaces |
+| `nav stash` | Stash current tabs to temporary memory |
+| `nav stash pop` | Restore the most recent stash |
+| `nav stash list` | List all stash entries |
+| `nav search <query>` | Semantic search across indexed pages |
+| `nav status` | Check daemon & extension connection health |
+| `nav ping` | Quick connection test |
+
+### Examples
+
+```bash
+# Switch browser context to a feature branch
+nav checkout feat/auth-system
+
+# Save current tabs and start fresh
+nav stash
+nav branch create feat/new-api
+
+# Search for a page you read last week
+nav search "kubernetes helm values"
+
+# Check if everything is connected
+nav status
+# → Daemon:    ● Running
+# → Extension: ● Connected
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `NAV_SERVER` | `ws://127.0.0.1:9500` | WebSocket URL for nav-daemon |
+| `NAV_HTTP` | `http://127.0.0.1:9498` | HTTP URL for nav-daemon |
+
+### How It Works
+
+1. You run `nav checkout feat/auth` in your terminal.
+2. The CLI tries to connect to the WebSocket daemon. If the daemon isn't running, the CLI **automatically spawns it** in the background.
+3. The daemon relays the command to the Chrome Extension's Service Worker.
+4. The extension saves your current tabs, opens the branch's saved tabs, and sends a success response back through the same channel.
+5. The daemon auto-shuts down after **10 minutes** of inactivity to save resources.
+
+---
+
 <div align="center">
   <sub>Designed with 💜 for the builders of tomorrow.</sub>
 </div>
