@@ -461,6 +461,25 @@ function scheduleReconnect() {
   }, CLI_RECONNECT_MS);
 }
 
+// ---- Service Worker Keepalive (MV3) ----
+// Chrome kills idle Service Workers after ~30s. Use chrome.alarms to keep it alive
+// while the WebSocket bridge is active.
+
+const KEEPALIVE_ALARM = 'nav-cli-keepalive';
+
+chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 }); // ~24 seconds
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === KEEPALIVE_ALARM) {
+    // Touch the WebSocket to keep the connection alive
+    if (cliSocket && cliSocket.readyState === WebSocket.OPEN) {
+      cliSocket.send(JSON.stringify({ source: 'extension', type: 'HEARTBEAT' }));
+    } else {
+      connectToCLIServer();
+    }
+  }
+});
+
 // Start CLI bridge
 connectToCLIServer();
 

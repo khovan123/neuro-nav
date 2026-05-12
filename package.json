@@ -10,6 +10,10 @@
   "scripts": {
     "dev": "npm run dev -w apps/extension",
     "build": "npm run build -w apps/extension",
+    "build:server": "npm run build -w packages/nav-server",
+    "build:cli": "npm run build -w packages/nav-cli",
+    "build:all": "npm run build && npm run build:server && npm run build:cli",
+    "package:extension": "npm run build && cd apps/extension && zip -r ../../neuro-nav-extension.zip dist/ -x '*.map'",
     "test": "npm run test -w apps/extension",
     "lint": "npm run lint -w apps/extension"
   },

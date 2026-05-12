@@ -5,4 +5,4 @@ dist/
 .env
 .env.local
 *.tsbuildinfo
-**/neuro-nav-extension.zipneuro-nav-extension-*.zip
+**/neuro-nav-extension*.zip
