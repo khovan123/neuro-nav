@@ -12,6 +12,7 @@ import { BrowsingGraph } from './pages/BrowsingGraph';
 import { Peers } from './pages/Peers';
 import { Settings } from './pages/Settings';
 import { CommandPalette } from './components/CommandPalette';
+import { AiStatusBar, AiStatusDot } from './components/AiStatusBar';
 import { IconTabs, IconGrid, IconBranch, IconGraph, IconPeers, IconSettings, IconSearch, IconShieldLock, IconAlertTriangle } from '@/shared/ui/Icons';
 import { Tooltip } from '@/shared/ui/Tooltip';
 
@@ -272,19 +273,29 @@ export function App() {
                 <IconSearch size={14} />
               </button>
             </Tooltip>
-            <span className="text-[10px] font-mono text-text-tertiary bg-surface-overlay px-1.5 py-0.5 rounded">
-              v1.0.0
-            </span>
-            <Tooltip content={daemonConnected ? 'Local: Connected' : 'Local: Disconnected'} position="bottom">
-              <span className={`w-2 h-2 rounded-full shrink-0 ${daemonConnected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-zinc-600'}`} />
-            </Tooltip>
           </div>
         </header>
+
+        {/* AI Model loading progress */}
+        <AiStatusBar />
 
         {/* Page content */}
         <div className="flex-1 overflow-hidden">
           <PageContent page={currentPage} />
         </div>
+
+        {/* Footer — status dots + version */}
+        <footer className="flex items-center justify-end gap-2 px-3 py-1.5 border-t border-border-default bg-surface-primary/50">
+          <Tooltip content={daemonConnected ? 'Daemon: Connected' : 'Daemon: Disconnected'} position="left">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${daemonConnected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-zinc-600'}`} />
+          </Tooltip>
+          <Tooltip content="AI Model Status" position="left">
+            <AiStatusDot />
+          </Tooltip>
+          <span className="text-[10px] font-mono text-text-tertiary bg-surface-overlay px-1.5 py-0.5 rounded">
+            v1.0.0
+          </span>
+        </footer>
       </main>
 
       {/* Command Palette overlay */}

@@ -298,6 +298,31 @@ const projectSlice = createSlice({
   },
 });
 
+// ---- AI Slice (Phase 4 — Vector Embeddings) ----
+
+export type AiModelStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export interface AiState {
+  modelStatus: AiModelStatus;
+  loadProgress: number; // 0–100
+  modelName: string;
+}
+
+const aiSlice = createSlice({
+  name: 'ai',
+  initialState: { modelStatus: 'idle', loadProgress: 0, modelName: '' } as AiState,
+  reducers: {
+    setAiModelStatus(state, action: PayloadAction<AiModelStatus>) {
+      state.modelStatus = action.payload;
+    },
+    setAiLoadProgress(state, action: PayloadAction<{ progress: number; modelName?: string }>) {
+      state.loadProgress = action.payload.progress;
+      if (action.payload.modelName) state.modelName = action.payload.modelName;
+      if (state.modelStatus !== 'loading') state.modelStatus = 'loading';
+    },
+  },
+});
+
 // ---- Store ----
 
 export const store = configureStore({
@@ -309,6 +334,7 @@ export const store = configureStore({
     peers: peersSlice.reducer,
     nav: navSlice.reducer,
     project: projectSlice.reducer,
+    ai: aiSlice.reducer,
   },
   devTools: process.env.NODE_ENV !== 'production',
 });
@@ -324,3 +350,4 @@ export const { setStashEntries, addStashEntry, removeLatestStash } = stashSlice.
 export const { setMyPeerInfo, setPeers, updatePeerStatus, removePeer, addIncomingShare, dismissIncomingShare } = peersSlice.actions;
 export const { navigate } = navSlice.actions;
 export const { setProjectContext, clearProjectContext, setDaemonConnected } = projectSlice.actions;
+export const { setAiModelStatus, setAiLoadProgress } = aiSlice.actions;

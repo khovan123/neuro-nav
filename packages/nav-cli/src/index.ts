@@ -17,6 +17,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { setupNativeHost } from './native-manifest.js';
 
 const SERVER_URL = process.env.NAV_SERVER ?? 'ws://127.0.0.1:9500';
 const HTTP_URL = process.env.NAV_HTTP ?? 'http://127.0.0.1:9498';
@@ -126,6 +127,8 @@ function usage() {
   console.log(`  ${c.cyan}scan [path] [--watch]${c.reset}     Scan project directory for tech stack`);
   console.log(`  ${c.cyan}status${c.reset}                   Check daemon connection status`);
   console.log(`  ${c.cyan}ping${c.reset}                     Test connection`);
+  console.log(`  ${c.cyan}setup-native-host${c.reset}        Install Chrome Native Messaging host`);
+  console.log(`                             ${c.dim}--extension-id=<id>${c.reset}`);
   console.log();
   console.log(`${c.bold}ENVIRONMENT${c.reset}`);
   console.log(`  NAV_SERVER    WebSocket URL (default: ${SERVER_URL})`);
@@ -140,7 +143,7 @@ function usage() {
 
 function sendCommand(type: string, payload?: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(SERVER_URL, { headers: { 'Sec-WebSocket-Protocol': SECRET_TOKEN } });
+    const ws = new WebSocket(SERVER_URL, [SECRET_TOKEN]);
     let responded = false;
 
     const timeout = setTimeout(() => {
@@ -549,6 +552,29 @@ async function main(retried = false) {
   // First-time setup
   if (command === 'init') {
     await handleInit();
+    return;
+  }
+
+  // Native Messaging host setup (no daemon needed)
+  if (command === 'setup-native-host') {
+    const idArg = args.find(a => a.startsWith('--extension-id='));
+    const extensionId = idArg?.split('=')[1];
+    if (!extensionId) {
+      console.log(`${c.red}✗ Extension ID required${c.reset}`);
+      console.log(`  ${c.dim}Find it at chrome://extensions (the ID under Neuro-Nav)${c.reset}`);
+      console.log(`  ${c.cyan}nav setup-native-host --extension-id=<id>${c.reset}`);
+      return;
+    }
+    const result = setupNativeHost({ extensionId });
+    if (result.success) {
+      console.log(`${c.green}✓ Native Messaging host installed${c.reset}`);
+      console.log(`  ${c.dim}Manifest: ${result.manifestPath}${c.reset}`);
+      console.log();
+      console.log(`  ${c.bold}Next:${c.reset} Reload the extension at ${c.cyan}chrome://extensions${c.reset}`);
+      console.log(`  The daemon will now auto-start when the extension needs it.`);
+    } else {
+      console.log(`${c.red}✗ ${result.error}${c.reset}`);
+    }
     return;
   }
 

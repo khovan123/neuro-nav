@@ -5,9 +5,23 @@
    Communication:
      postMessage({ type: 'EMBED', id, text }) → onmessage({ type: 'RESULT', id, embedding })
      postMessage({ type: 'INIT' })             → onmessage({ type: 'READY' })
+     Progress events:                           → onmessage({ type: 'PROGRESS', ... })
    ============================================================ */
 
-import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
+
+// ---- CRITICAL: Configure ONNX to load WASM files locally ----
+// Chrome extension CSP blocks loading scripts from CDN.
+// The WASM files are copied to dist/ by the Vite build plugin.
+env.allowLocalModels = false;
+
+// Derive the extension's base URL from the worker's own location
+const extensionBase = self.location.href.replace(/[^/]*$/, '');
+
+// Tell ONNX Runtime to load WASM files from the extension bundle
+if (env.backends?.onnx?.wasm) {
+  env.backends.onnx.wasm.wasmPaths = extensionBase;
+}
 
 let extractor: FeatureExtractionPipeline | null = null;
 let initializing = false;
@@ -21,9 +35,36 @@ async function init() {
       'feature-extraction',
       'Xenova/all-MiniLM-L6-v2',
       {
-        // Use WASM backend (works in extension workers)
         device: 'wasm',
         dtype: 'q8',
+        progress_callback: (progress: any) => {
+          // Forward download progress to the service worker
+          if (progress.status === 'progress') {
+            self.postMessage({
+              type: 'PROGRESS',
+              file: progress.file ?? '',
+              loaded: progress.loaded ?? 0,
+              total: progress.total ?? 0,
+              progress: progress.progress ?? 0,
+            });
+          } else if (progress.status === 'initiate') {
+            self.postMessage({
+              type: 'PROGRESS',
+              file: progress.file ?? '',
+              loaded: 0,
+              total: 0,
+              progress: 0,
+            });
+          } else if (progress.status === 'done') {
+            self.postMessage({
+              type: 'PROGRESS',
+              file: progress.file ?? '',
+              loaded: 1,
+              total: 1,
+              progress: 100,
+            });
+          }
+        },
       }
     );
     self.postMessage({ type: 'READY' });

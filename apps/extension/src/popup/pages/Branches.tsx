@@ -66,6 +66,28 @@ export function Branches() {
     stashOps.listStash().then((s) => dispatch(setStashEntries(s)));
   }, [dispatch]);
 
+  // Re-sync branch data when tabs change (close/create/move)
+  // Waits 600ms to let the background's 500ms debounce sync finish first.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const reload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        branchOps.listBranches().then((b) => dispatch(setBranches(b)));
+      }, 600);
+    };
+
+    chrome.tabs.onRemoved.addListener(reload);
+    chrome.tabs.onCreated.addListener(reload);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      chrome.tabs.onRemoved.removeListener(reload);
+      chrome.tabs.onCreated.removeListener(reload);
+    };
+  }, [dispatch]);
+
   // Get current tabs as snapshots (scoped to this window)
   const getCurrentTabs = useCallback(async () => {
     const queryOpts = windowId ? { windowId } : { currentWindow: true as const };

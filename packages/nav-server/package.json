@@ -1,6 +1,6 @@
 {
   "name": "@neuro-nav/server",
-  "version": "3.0.0",
+  "version": "1.0.0",
   "description": "Local WebSocket daemon that bridges the Neuro-Nav CLI with the browser extension",
   "type": "module",
   "main": "dist/index.js",

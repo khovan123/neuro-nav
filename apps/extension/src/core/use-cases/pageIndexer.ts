@@ -1,10 +1,11 @@
 /* ============================================================
-   PAGE INDEXER — Orchestrates extraction → classification → indexing
+   PAGE INDEXER — Orchestrates extraction → classification → embedding → indexing
    ============================================================ */
 
 import type { PageDocument } from '@/core/entities/PageDocument';
 import { classifyPage } from '@/core/entities/PageDocument';
 import { indexPage } from '@/infrastructure/search/searchIndex';
+import { embed, isReady } from '@/infrastructure/ai/embeddingService';
 
 export interface ExtractedPagePayload {
   url: string;
@@ -16,7 +17,7 @@ export interface ExtractedPagePayload {
 }
 
 /**
- * Process an extracted page: classify and index it.
+ * Process an extracted page: classify, embed (if ready), and index it.
  */
 export async function processExtractedPage(payload: ExtractedPagePayload): Promise<PageDocument> {
   const category = classifyPage(payload.url, payload.title);
@@ -30,6 +31,17 @@ export async function processExtractedPage(payload: ExtractedPagePayload): Promi
     category,
     extractedAt: payload.extractedAt,
   };
+
+  // Generate vector embedding if the AI model is ready (non-blocking fallback)
+  if (isReady() && payload.text.length > 50) {
+    try {
+      doc.embedding = await embed(payload.text);
+      doc.embeddedAt = Date.now();
+      console.log(`[Neuro-Nav] 🧠 Embedded: ${doc.title}`);
+    } catch (err) {
+      console.warn('[Neuro-Nav] Embedding skipped:', err);
+    }
+  }
 
   await indexPage(doc);
 

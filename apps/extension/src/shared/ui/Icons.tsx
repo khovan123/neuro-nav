@@ -265,3 +265,15 @@ export function IconCheckCircle({ size = 16, className = '' }: IconProps) {
   );
 }
 
+export function IconBrain({ size = 16, className = '' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 2a6 6 0 0 0-6 6c0 1.6.6 3 1.7 4.1L12 17l4.3-4.9A6 6 0 0 0 12 2z" />
+      <path d="M12 2a6 6 0 0 1 6 6c0 3.3-2.7 6-6 6" />
+      <path d="M12 2a6 6 0 0 0-6 6c0 3.3 2.7 6 6 6" />
+      <path d="M12 17v5" />
+      <path d="M9 9c0-1 .6-2 1.5-2" />
+      <path d="M15 9c0-1-.6-2-1.5-2" />
+    </svg>
+  );
+}

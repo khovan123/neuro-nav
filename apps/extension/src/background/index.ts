@@ -13,6 +13,7 @@ import { recordPageVisit, recordNavigation, getGraphData } from '@/core/use-case
 import { classifyPage } from '@/core/entities/PageDocument';
 import { fromChromeTab, toSnapshot } from '@/core/entities/Tab';
 import type { ProjectContext } from '@/core/entities/ProjectContext';
+import { initEmbedding, onStatusChange, onProgress, getStatus, type AiModelStatus } from '@/infrastructure/ai/embeddingService';
 
 // ---- Message Router ----
 
@@ -413,6 +414,8 @@ const CLI_DEFAULT_URL = 'ws://127.0.0.1';
 const CLI_DEFAULT_PORT = '9500';
 const CLI_DEFAULT_TOKEN = 'neuro_nav_secure_token_2026';
 const CLI_RECONNECT_MS = 5_000;
+const NATIVE_HOST_NAME = 'com.neuronav.daemon';
+let nativeStartAttempted = false;
 
 /** Handlers for CLI commands — reuses the same logic as the popup message router. */
 const cliCommandHandlers: Record<string, (payload: unknown) => Promise<unknown>> = {
@@ -611,10 +614,61 @@ async function connectToCLIServer() {
   };
 }
 
+/** Try to start the daemon via Chrome Native Messaging (one attempt per session). */
+async function tryNativeStart(): Promise<boolean> {
+  if (nativeStartAttempted) return false;
+  nativeStartAttempted = true;
+
+  return new Promise((resolve) => {
+    try {
+      const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+      let responded = false;
+
+      port.onMessage.addListener((msg: { ok?: boolean }) => {
+        responded = true;
+        port.disconnect();
+        if (msg.ok) {
+          console.log('[Neuro-Nav] Daemon started via Native Messaging');
+          resolve(true);
+        } else {
+          console.warn('[Neuro-Nav] Native host responded but daemon start failed');
+          resolve(false);
+        }
+      });
+
+      port.onDisconnect.addListener(() => {
+        if (!responded) {
+          const err = chrome.runtime.lastError?.message ?? '';
+          // Common: host not installed — silently skip
+          if (err.includes('not found') || err.includes('Specified native messaging host')) {
+            console.log('[Neuro-Nav] Native Messaging host not installed — skipping auto-start');
+          } else {
+            console.warn('[Neuro-Nav] Native Messaging error:', err);
+          }
+          resolve(false);
+        }
+      });
+
+      // Send start command
+      port.postMessage({ type: 'START_DAEMON' });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 function scheduleReconnect() {
   if (cliReconnectTimer) return;
-  cliReconnectTimer = setTimeout(() => {
+  cliReconnectTimer = setTimeout(async () => {
     cliReconnectTimer = null;
+    // If first failure, try native start before reconnecting
+    if (!nativeStartAttempted) {
+      const started = await tryNativeStart();
+      if (started) {
+        // Give the daemon a moment to bind ports
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
     connectToCLIServer();
   }, CLI_RECONNECT_MS);
 }
@@ -652,3 +706,31 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 console.log('[Neuro-Nav] Service Worker initialized');
+
+// ---- AI Embedding Pipeline (Phase 4) ----
+
+// Broadcast AI model status & progress to popup
+onStatusChange((status: AiModelStatus) => {
+  chrome.storage.local.set({ aiModelStatus: status });
+  chrome.runtime.sendMessage({ type: 'AI_STATUS_CHANGED', status }).catch(() => {});
+});
+
+onProgress((progress) => {
+  chrome.runtime.sendMessage({
+    type: 'AI_PROGRESS',
+    file: progress.file,
+    progress: Math.round(progress.progress),
+  }).catch(() => {});
+});
+
+// Handle AI status queries from popup
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'GET_AI_STATUS') {
+    sendResponse({ status: getStatus() });
+    return false;
+  }
+  return false;
+});
+
+// Initialize the AI model eagerly on startup
+initEmbedding();
