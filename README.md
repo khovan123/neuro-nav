@@ -36,16 +36,17 @@ Neuro-Nav transforms your browser from a mere "web surfing window" into an **Int
 
 ## 🏷️ Release Notes (v1.0.0)
 
-- **Core Framework:** React 18, Vite, Tailwind CSS v4, and Manifest V3.
+- **Core Framework:** React 18, Vite, Tailwind CSS v4 (CSS-first config), and Manifest V3.
 - **Git-flow Tabs:** Branching (`feat/*`, `chill/*`...), Stash & Pop, Workspace Management.
 - **On-Device AI Search:** Local vector search using `all-MiniLM-L6-v2` via ONNX Runtime WASM. All inference runs on your machine — no cloud, no API keys.
 - **Offscreen Document Architecture:** AI inference runs in a dedicated Offscreen Document, fully compliant with Manifest V3 Service Worker constraints.
 - **Semantic Search:** Local search engine (Orama in-memory DB), indexing up to 5,000 pages via `Cmd+K`.
-- **Graph Visualization:** 2D browsing telemetry mapping with D3.js.
+- **Per-Branch Graph:** 2D browsing telemetry mapping with D3.js — each branch maintains its own independent graph.
 - **P2P Sync:** Serverless peer-to-peer Workspace synchronization via WebRTC (PeerJS).
 - **CLI Bridge:** Terminal-first workflow with `nav` command, auto-daemon, and project scanning.
 - **Native Messaging:** Auto-start the daemon from the Chrome extension via Chrome's Native Messaging API.
-- **Status Indicators:** Real-time AI model and daemon connectivity status displayed in the popup footer.
+- **Stable Connectivity:** Exponential backoff WebSocket reconnection with silent HTTP probing to eliminate `ERR_CONNECTION_REFUSED` console noise.
+- **Optimized Builds:** Minified production bundles (~1.4MB JS, ~60% size reduction), with custom Vite plugins to suppress third-party library warnings.
 - **Auto-Maintenance:** Background cleanup every 24 hours, DOM extraction via `requestIdleCallback`.
 
 ## ✨ Core Features
@@ -59,22 +60,27 @@ Instead of managing tabs manually, group them into workflows.
 ### 2. 🧠 On-Device AI Search
 Your data stays on your machine. Zero cloud dependency.
 * **Vector Embeddings:** Pages are embedded using `all-MiniLM-L6-v2` running locally via ONNX Runtime WASM. No API keys or network access required.
-* **DOM Extraction:** Extracts core text content after 15 seconds of reading. Eliminates ads and junk.
+* **DOM Extraction:** Extracts core text content at `document_idle` via `requestIdleCallback`. Eliminates ads and junk.
 * **Keyword Search:** The Orama in-memory DB indexes up to 5,000 recent pages as a lightweight fallback.
 * **Command Palette:** Press `Cmd/Ctrl + K` to open semantic search. Find pages by meaning, not just keywords.
+* **Smart Upsert:** Chunk indexing uses direct ID-based removal to prevent duplicate entry errors during page re-crawls.
 
 ### 3. 🌐 Symbiotic Environment & P2P
 * **WebRTC Peer-to-Peer:** Send entire JSON Workspaces to colleagues without any intermediary servers.
 * **Intent Blocker:** On a coding branch (`feat/*`), the extension warns you if you accidentally navigate to distracting websites.
 
-### 4. 🕸️ Telemetry: Graph Mapping
-* Visualize your browsing history as an interactive 2D spider-web map (D3.js). See click streams and connections between your research resources.
+### 4. 🕸️ Per-Branch Browsing Graph
+* Visualize your browsing history as an interactive 2D spider-web map (D3.js force-directed layout).
+* **Branch-scoped:** Each branch maintains its own graph — nodes and edges are recorded and filtered per-branch, so switching branches shows only the relevant browsing context.
+* **Cluster visualization:** Convex hull grouping by domain with color-coded categories (tech, docs, social, media, shopping, email).
+* **Scoring algorithm:** `log(visits) × recency × log(linkCount)` — more important pages appear as larger nodes.
 
 ### 5. 🖥️ Terminal-First Workflow
 * **CLI Bridge:** Run `nav checkout`, `nav search`, `nav stash` directly from your terminal.
 * **Auto-Daemon:** The background process starts and stops automatically — no manual management.
 * **Native Messaging:** The extension can auto-start the daemon when it's not running, via Chrome's Native Messaging API.
 * **Project Scan:** `nav scan .` detects your tech stack and syncs context to the extension.
+* **Resilient Connection:** Exponential backoff (up to 2min) with HTTP probe before WebSocket initialization. No console noise when daemon is offline.
 
 ---
 
@@ -83,7 +89,7 @@ Your data stays on your machine. Zero cloud dependency.
 ```
 neuro-nav/
 ├── apps/
-│   └── extension/              # Chrome Extension (React + Vite + Tailwind)
+│   └── extension/              # Chrome Extension (React + Vite + Tailwind v4)
 │       ├── src/
 │       │   ├── background/     # Service Worker — message broker & alarm scheduler
 │       │   ├── core/           # Domain entities & use-cases
@@ -111,15 +117,27 @@ Service Worker           Offscreen Document         Web Worker
 
 > Service Workers cannot instantiate Web Workers directly. The Offscreen Document bridges this gap, hosting the ONNX inference worker in a standard DOM context.
 
+### Build Output
+
+| File | Size | Gzip | Content |
+| :--- | :--- | :--- | :--- |
+| `embedding-worker.js` | 870 KB | 228 KB | HuggingFace Transformers + ONNX bindings |
+| `popup.js` | 243 KB | 73 KB | All popup pages & Redux store |
+| `index.js` | 205 KB | 62 KB | React + ReactDOM shared chunk |
+| `searchIndex.js` | 86 KB | 28 KB | Orama search engine |
+| `background.js` | 19 KB | 6 KB | Service Worker |
+| ONNX WASM | 21.5 MB | 5 MB | ML inference runtime (cached) |
+
 ---
 
 ## ⚖️ Pros & Cons
 
 ### ✅ Pros
-* **100% Privacy & Offline:** All data (Vector DB, Tabs, History) is processed locally. AI model runs on-device via WASM — no cloud calls.
-* **High Performance:** Extension bundle is ~300KB (excluding WASM model). AI inference is offloaded to a dedicated worker thread.
+* **100% Privacy & Offline:** All data (Vector DB, Tabs, History, Graph) is processed locally. AI model runs on-device via WASM — no cloud calls.
+* **Optimized Bundle:** Extension JS is ~1.4MB minified (excluding WASM model). AI inference is offloaded to a dedicated worker thread.
 * **Modern UX:** Dark "Tech/Neuro" design with glassmorphism, real-time status indicators, and keyboard-first workflows.
 * **RAM Optimization:** Auto-pruning every 24h, intelligent indexing limits, and lazy model loading.
+* **Branch-Scoped Context:** Browsing graphs, tab states, and workspaces are all isolated per-branch.
 
 ### ❌ Cons
 * **Desktop Only:** Tab management and P2P features are not available on Mobile browsers.
@@ -183,9 +201,10 @@ This installs a Native Messaging host manifest so the extension can spawn the da
 ## 💡 Usage Guide
 
 1. **Launch:** Click the Neuro-Nav icon on the Chrome toolbar or press `Ctrl+Shift+N` / `Cmd+Shift+N`.
-2. **Save a Working Branch:** In the **Branches** tab, create a branch (e.g., `feat/login-api`). The system bundles your current tabs into this branch.
+2. **Save a Working Session:** In the **Sessions** tab, create a session (e.g., `feat/login-api`). The system bundles your current tabs into this session.
 3. **AI Search:** Press `Cmd/Ctrl + K` to open the Command Palette. Type a semantic keyword to search across pages you've read.
-4. **P2P Sharing:** Switch to the **Peers** tab, copy your Peer ID, and share it with a colleague for direct workspace sync.
+4. **Browsing Graph:** Switch to the **Web Map** tab to see a visual map of your browsing for the current session.
+5. **P2P Sharing:** Switch to the **Peers** tab, copy your ID, and share it with a colleague for direct workspace sync.
 
 ---
 
@@ -206,11 +225,12 @@ Terminal (nav-cli)  ── WebSocket ──→  nav-daemon (:9500)  ←── We
 | :--- | :--- |
 | `nav help` | Show all available commands |
 | `nav init` | First-time setup (generate secret key) |
-| `nav checkout <name>` | Switch to a browser branch (shorthand) |
-| `nav branch list` | List all saved branches |
-| `nav branch checkout <name>` | Switch to a branch |
-| `nav branch create <name>` | Create and activate a new branch |
-| `nav branch delete <id>` | Delete a branch by ID |
+| `nav checkout <name>` | Switch to a browser session (shorthand) |
+| `nav branch list` | List all saved sessions |
+| `nav branch checkout <name>` | Switch to a session |
+| `nav branch checkout <name> --new` | Create a new session and switch to it |
+| `nav branch create <name>` | Create and activate a new session |
+| `nav branch delete <id>` | Delete a session by ID |
 | `nav workspace list` | List all saved workspaces |
 | `nav stash` | Stash current tabs to temporary memory |
 | `nav stash pop` | Restore the most recent stash |
@@ -224,7 +244,7 @@ Terminal (nav-cli)  ── WebSocket ──→  nav-daemon (:9500)  ←── We
 ### Examples
 
 ```bash
-# Switch browser context to a feature branch
+# Switch browser context to a feature session
 nav checkout feat/auth-system
 
 # Save current tabs and start fresh
@@ -259,7 +279,7 @@ nav setup-native-host --extension-id=abcdef1234567890
 1. You run `nav checkout feat/auth` in your terminal.
 2. The CLI tries to connect to the WebSocket daemon. If the daemon isn't running, the CLI **automatically spawns it** in the background.
 3. The daemon relays the command to the Chrome Extension's Service Worker.
-4. The extension saves your current tabs, opens the branch's saved tabs, and sends a success response back through the same channel.
+4. The extension saves your current tabs, opens the session's saved tabs, and sends a success response back through the same channel.
 5. The daemon auto-shuts down after **10 minutes** of inactivity to save resources.
 
 ---
