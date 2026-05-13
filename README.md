@@ -9,7 +9,7 @@
   <p><strong>The Developer's Micro-OS: Context management, semantic search, and AI-powered browsing for software engineers.</strong></p>
   
   <p>
-    <img alt="Version" src="https://img.shields.io/badge/version-v1.0.0-blue.svg" />
+    <img alt="Version" src="https://img.shields.io/badge/version-v1.5.0-blue.svg" />
     <img alt="React" src="https://img.shields.io/badge/react-%2320232a.svg?style=flat&logo=react&logoColor=%2361DAFB" />
     <img alt="TailwindCSS" src="https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=flat&logo=tailwind-css&logoColor=white" />
     <img alt="TypeScript" src="https://img.shields.io/badge/typescript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white" />
@@ -34,7 +34,7 @@
 
 Neuro-Nav transforms your browser from a mere "web surfing window" into an **Intelligent Environment (Micro-OS)**. With fully on-device AI vector search, a spider-web graph mapping system, and Git-Flow style tab management, every document you read becomes a part of your "digital brain".
 
-## 🏷️ Release Notes (v1.0.0)
+## 🏷️ Release Notes (v1.5.0)
 
 - **Core Framework:** React 18, Vite, Tailwind CSS v4 (CSS-first config), and Manifest V3.
 - **Git-flow Tabs:** Branching (`feat/*`, `chill/*`...), Stash & Pop, Workspace Management.

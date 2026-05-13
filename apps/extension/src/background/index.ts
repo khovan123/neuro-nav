@@ -73,6 +73,80 @@ async function syncTabGroup(windowId: number, branchName: string): Promise<void>
   }
 }
 
+// ---- Auto-Reconcile Existing Chrome Tab Groups → Branches ----
+// Runs on Service Worker startup. Scans all windows for tab groups and
+// syncs or creates branches so existing groups are automatically tracked.
+
+async function reconcileExistingTabGroups(): Promise<void> {
+  try {
+    const allWindows = await chrome.windows.getAll();
+    const existingBranches = await branchOps.listBranches();
+    const branchNameSet = new Set(existingBranches.map(b => b.name));
+
+    for (const win of allWindows) {
+      if (!win.id || win.type !== 'normal') continue;
+
+      let groups: chrome.tabGroups.TabGroup[];
+      try {
+        groups = await chrome.tabGroups.query({ windowId: win.id });
+      } catch { continue; }
+
+      if (groups.length === 0) continue;
+
+      const allTabs = await chrome.tabs.query({ windowId: win.id });
+
+      for (const group of groups) {
+        if (!group.title) continue; // skip unnamed groups
+
+        // Get only tabs belonging to this specific group
+        const groupTabs = allTabs
+          .filter(t => t.groupId === group.id)
+          .map(fromChromeTab)
+          .map(toSnapshot);
+
+        if (groupTabs.length === 0) continue;
+
+        if (branchNameSet.has(group.title)) {
+          // Branch exists → merge new tabs (deduplicate by URL)
+          const branch = existingBranches.find(b => b.name === group.title)!;
+          const existingUrls = new Set(branch.tabs.map(t => t.url));
+          const newTabs = groupTabs.filter(t => !existingUrls.has(t.url));
+
+          if (newTabs.length > 0) {
+            branch.tabs = [...branch.tabs, ...newTabs];
+            branch.updatedAt = Date.now();
+          }
+
+          // Ensure window is marked active
+          if (!branch.activeInWindows) branch.activeInWindows = [];
+          if (!branch.activeInWindows.includes(win.id)) {
+            branch.activeInWindows.push(win.id);
+          }
+          branch.isActive = true;
+          await branchOps.updateBranch(branch);
+
+          console.log(`[Neuro-Nav] Reconciled group "${group.title}" → existing branch (${newTabs.length} new tabs)`);
+        } else {
+          // No matching branch → create one from the group's tabs
+          try {
+            const newBranch = await branchOps.createNewBranch(group.title, groupTabs, true, win.id);
+            branchNameSet.add(newBranch.name);
+            existingBranches.push(newBranch);
+            console.log(`[Neuro-Nav] Created branch "${group.title}" from existing tab group (${groupTabs.length} tabs)`);
+          } catch (err) {
+            console.warn(`[Neuro-Nav] Could not create branch from group "${group.title}":`, err);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Neuro-Nav] Tab group reconciliation failed:', err);
+  }
+}
+
+// Run reconciliation on Service Worker startup
+reconcileExistingTabGroups();
+
 /**
  * Send a command to the CLI daemon via WebSocket and await a response.
  * Returns null if daemon is not connected or timeout.
@@ -392,15 +466,24 @@ chrome.runtime.onMessage.addListener(router);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PAGE_CONTENT_EXTRACTED') {
-    // Resolve branch from the sender tab's window
-    const windowId = sender.tab?.windowId;
-    const branchPromise = windowId
-      ? getActiveBranchForWindow(windowId)
-      : Promise.resolve(null);
+    // Resolve branch from the sender tab's group, then window
+    const tab = sender.tab;
+    const resolveBranch = async (): Promise<string> => {
+      if (tab?.groupId != null && tab.groupId !== -1) {
+        try {
+          const group = await chrome.tabGroups.get(tab.groupId);
+          if (group.title) return group.title;
+        } catch { /* group removed */ }
+      }
+      if (tab?.windowId) {
+        const branch = await getActiveBranchForWindow(tab.windowId);
+        if (branch) return branch.name;
+      }
+      return 'default';
+    };
 
-    branchPromise
-      .then((branch) => {
-        const branchName = branch?.name ?? 'default';
+    resolveBranch()
+      .then((branchName) => {
         return processExtractedChunks(message.payload, branchName);
       })
       .then((count) => {
@@ -565,9 +648,22 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     const favicon = tab.favIconUrl ?? '';
     const category = classifyPage(details.url, title);
 
-    // Record as a graph node
-    const activeBranch = tab.windowId ? await branchOps.getActiveBranchForWindow(tab.windowId) : null;
-    const branchName = activeBranch?.name ?? 'default';
+    // Record as a graph node — resolve branch from tab's group (not window-level)
+    let branchName = 'default';
+    if (tab.windowId) {
+      if (tab.groupId != null && tab.groupId !== -1) {
+        // Tab is in a group — use the group's title as branch name
+        try {
+          const group = await chrome.tabGroups.get(tab.groupId);
+          if (group.title) branchName = group.title;
+        } catch { /* group may have been removed */ }
+      }
+      // Fallback: use window-level active branch if not in a group
+      if (branchName === 'default') {
+        const activeBranch = await branchOps.getActiveBranchForWindow(tab.windowId);
+        branchName = activeBranch?.name ?? 'default';
+      }
+    }
     await recordPageVisit(details.url, title, favicon, category, branchName);
 
     // Record transition edge
@@ -1141,7 +1237,7 @@ connectToCLIServer();
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    console.log('[Neuro-Nav] Extension installed — v1.0.0');
+    console.log('[Neuro-Nav] Extension installed — v1.5.0');
   } else if (details.reason === 'update') {
     console.log(`[Neuro-Nav] Updated from ${details.previousVersion}`);
   }

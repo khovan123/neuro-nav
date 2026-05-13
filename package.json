@@ -1,6 +1,6 @@
 {
   "name": "neuro-nav",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "private": true,
   "description": "The Developer's Micro-OS — A browser-integrated micro operating system for software engineers",
   "workspaces": [

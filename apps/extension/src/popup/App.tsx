@@ -297,7 +297,7 @@ export function App() {
             <AiStatusDot />
           </Tooltip>
           <span className="text-[10px] font-mono text-text-tertiary bg-surface-overlay px-1.5 py-0.5 rounded">
-            v1.0.0
+            v1.5.0
           </span>
         </footer>
       </main>

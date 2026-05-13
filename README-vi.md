@@ -9,7 +9,7 @@
   <p><strong>The Developer's Micro-OS: Context management, semantic search, and AI-powered browsing for software engineers.</strong></p>
   
   <p>
-    <img alt="Version" src="https://img.shields.io/badge/version-v1.0.0-blue.svg" />
+    <img alt="Version" src="https://img.shields.io/badge/version-v1.5.0-blue.svg" />
     <img alt="React" src="https://img.shields.io/badge/react-%2320232a.svg?style=flat&logo=react&logoColor=%2361DAFB" />
     <img alt="TailwindCSS" src="https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=flat&logo=tailwind-css&logoColor=white" />
     <img alt="TypeScript" src="https://img.shields.io/badge/typescript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white" />
@@ -34,7 +34,7 @@
 
 Neuro-Nav biến trình duyệt của bạn từ một "cửa sổ lướt web" thành một **Môi trường hoạt động thông minh (Micro-OS)**. Với công nghệ AI embedding hoàn toàn offline, hệ thống đồ thị mạng nhện (Graph Mapping) theo từng phiên làm việc và quản lý tab theo phong cách Git-Flow, mọi tài liệu bạn đọc đều trở thành một phần của "bộ não kỹ thuật số".
 
-## 🏷️ Release Notes (v1.0.0)
+## 🏷️ Release Notes (v1.5.0)
 
 Phiên bản khởi chạy đầu tiên của Neuro-Nav. Bao gồm các chức năng cốt lõi đã hoàn thiện:
 - **Core Framework:** Trải nghiệm mượt mà với React 18, Vite, Tailwind CSS v4 (CSS-first config) và chuẩn Manifest V3.
