@@ -9,12 +9,13 @@ import { ActiveTabs } from './pages/ActiveTabs';
 import { Workspaces } from './pages/Workspaces';
 import { Branches } from './pages/Branches';
 import { BrowsingGraph } from './pages/BrowsingGraph';
+import { History } from './pages/History';
 import { Peers } from './pages/Peers';
 import { Snippets } from './pages/Snippets';
 import { Settings } from './pages/Settings';
 import { CommandPalette } from './components/CommandPalette';
 import { AiStatusBar, AiStatusDot } from './components/AiStatusBar';
-import { IconTabs, IconGrid, IconBranch, IconGraph, IconPeers, IconScissors, IconSettings, IconSearch, IconShieldLock, IconAlertTriangle } from '@/shared/ui/Icons';
+import { IconTabs, IconGrid, IconBranch, IconGraph, IconHistory, IconPeers, IconScissors, IconSettings, IconSearch, IconShieldLock, IconAlertTriangle } from '@/shared/ui/Icons';
 import { Tooltip } from '@/shared/ui/Tooltip';
 
 const NAV_ITEMS: { page: NavPage; icon: typeof IconTabs; label: string; ready: boolean }[] = [
@@ -22,6 +23,7 @@ const NAV_ITEMS: { page: NavPage; icon: typeof IconTabs; label: string; ready: b
   { page: 'workspaces', icon: IconGrid, label: 'Workspaces', ready: true },
   { page: 'branches', icon: IconBranch, label: 'Sessions', ready: true },
   { page: 'graph', icon: IconGraph, label: 'Web Map', ready: true },
+  { page: 'history', icon: IconHistory, label: 'History', ready: true },
   { page: 'snippets', icon: IconScissors, label: 'Snippets', ready: true },
   { page: 'peers', icon: IconPeers, label: 'Team', ready: true },
 ];
@@ -36,6 +38,8 @@ function PageContent({ page }: { page: NavPage }) {
       return <Branches />;
     case 'graph':
       return <BrowsingGraph />;
+    case 'history':
+      return <History />;
     case 'snippets':
       return <Snippets />;
     case 'peers':

@@ -259,7 +259,7 @@ const peersSlice = createSlice({
 
 // ---- Navigation Slice ----
 
-export type NavPage = 'tabs' | 'workspaces' | 'branches' | 'graph' | 'peers' | 'snippets' | 'settings';
+export type NavPage = 'tabs' | 'workspaces' | 'branches' | 'graph' | 'history' | 'peers' | 'snippets' | 'settings';
 
 export interface NavState {
   currentPage: NavPage;

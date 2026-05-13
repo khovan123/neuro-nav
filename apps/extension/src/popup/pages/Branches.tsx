@@ -38,6 +38,27 @@ async function requestUngroupTabs(windowId: number): Promise<void> {
   } catch { /* ignore */ }
 }
 
+/** Toggle collapse/expand a branch's Chrome Tab Group */
+async function requestCollapseTabGroup(windowId: number, branchName: string): Promise<boolean | null> {
+  try {
+    const resp = await chrome.runtime.sendMessage({
+      type: 'COLLAPSE_TAB_GROUP',
+      payload: { windowId, branchName },
+    });
+    return resp?.collapsed ?? null;
+  } catch { return null; }
+}
+
+/** Close (remove all tabs in) a branch's Chrome Tab Group */
+async function requestCloseTabGroup(windowId: number, branchName: string): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'CLOSE_TAB_GROUP',
+      payload: { windowId, branchName },
+    });
+  } catch { /* ignore */ }
+}
+
 const DEFAULT_PREFIXES = ['space', 'feat', 'work', 'research', 'project', 'personal', 'temp'];
 
 /** Sanitize session name: lowercase, no slashes, spaces → dashes, trim leading/trailing dashes */
@@ -450,7 +471,19 @@ export function Branches() {
                       {otherWindowCount > 0 && ` · open in ${otherWindowCount} other window${otherWindowCount > 1 ? 's' : ''}`}
                     </span>
                   </div>
-                  {!isActiveHere && (
+                  {isActiveHere ? (
+                    <Tooltip content="Close group (Alt+Shift+W)">
+                      <button
+                        onClick={() => windowId && requestCloseTabGroup(windowId, branch.name)}
+                        className="p-1 rounded text-text-tertiary hover:text-accent-danger hover:bg-accent-danger/10 transition-colors cursor-pointer"
+                      >
+                        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 6L6 18" />
+                          <path d="M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </Tooltip>
+                  ) : (
                     <Button
                       variant="ghost" size="sm"
                       icon={<IconPlay size={11} />}

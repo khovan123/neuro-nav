@@ -8,6 +8,7 @@ import type { GraphNode, GraphEdge } from '@/core/entities/Graph';
 import { getGraphData, buildClusters } from '@/core/use-cases/graphBuilder';
 import { Badge } from '@/shared/ui/Badge';
 import { IconGraph } from '@/shared/ui/Icons';
+import { useAppSelector } from '@/store/hooks';
 
 // Category → color
 const CATEGORY_COLORS: Record<string, string> = {
@@ -35,20 +36,29 @@ interface D3Edge extends d3.SimulationLinkDatum<D3Node> {
   weight: number;
 }
 
-export function BrowsingGraph() {
+interface BrowsingGraphProps {
+  /** Override branch filter. If omitted, uses the active branch from store. */
+  branch?: string;
+}
+
+export function BrowsingGraph({ branch: branchProp }: BrowsingGraphProps = {}) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
   const [hoveredNode, setHoveredNode] = useState<D3Node | null>(null);
   const [stats, setStats] = useState({ nodes: 0, edges: 0, clusters: 0 });
 
-  // Load graph data
+  // Resolve branch: prop → store. Never fall back to undefined (which shows all branches).
+  const activeBranchName = useAppSelector((s) => s.branches.activeBranchName);
+  const branchFilter = branchProp ?? activeBranchName ?? '__no_branch__';
+
+  // Load graph data (scoped to branch)
   useEffect(() => {
-    getGraphData().then((data) => {
+    getGraphData(branchFilter).then((data) => {
       setGraphData(data);
       const clusters = buildClusters(data.nodes);
       setStats({ nodes: data.nodes.length, edges: data.edges.length, clusters: clusters.size });
     }).catch(console.error);
-  }, []);
+  }, [branchFilter]);
 
   // Render D3 graph
   useEffect(() => {
@@ -226,12 +236,12 @@ export function BrowsingGraph() {
   }, [graphData]);
 
   const handleRefresh = useCallback(() => {
-    getGraphData().then((data) => {
+    getGraphData(branchFilter).then((data) => {
       setGraphData(data);
       const clusters = buildClusters(data.nodes);
       setStats({ nodes: data.nodes.length, edges: data.edges.length, clusters: clusters.size });
     }).catch(console.error);
-  }, []);
+  }, [branchFilter]);
 
   return (
     <div className="flex flex-col h-full">

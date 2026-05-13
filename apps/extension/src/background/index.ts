@@ -469,15 +469,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Resolve branch from the sender tab's group, then window
     const tab = sender.tab;
     const resolveBranch = async (): Promise<string> => {
+      // RULE 3: Strict group isolation — only use tab's own group.
+      // Never fall back to window-level active branch.
       if (tab?.groupId != null && tab.groupId !== -1) {
         try {
           const group = await chrome.tabGroups.get(tab.groupId);
           if (group.title) return group.title;
         } catch { /* group removed */ }
-      }
-      if (tab?.windowId) {
-        const branch = await getActiveBranchForWindow(tab.windowId);
-        if (branch) return branch.name;
       }
       return 'default';
     };
@@ -507,6 +505,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Toggle collapse/expand a branch's Chrome tab group
+  if (message.type === 'COLLAPSE_TAB_GROUP') {
+    const { windowId: wid, branchName } = message.payload as { windowId: number; branchName: string };
+    (async () => {
+      try {
+        const groupId = await findGroupIdForBranch(wid, branchName);
+        if (groupId === -1) { sendResponse({ success: false }); return; }
+        const group = await chrome.tabGroups.get(groupId);
+        await chrome.tabGroups.update(groupId, { collapsed: !group.collapsed });
+        sendResponse({ success: true, collapsed: !group.collapsed });
+      } catch {
+        sendResponse({ success: false });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'UNGROUP_TABS') {
     const { windowId: wid } = message.payload as { windowId: number };
     (async () => {
@@ -518,6 +533,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (groupedTabIds.length > 0) {
           await chrome.tabs.ungroup(groupedTabIds);
         }
+        sendResponse({ success: true });
+      } catch {
+        sendResponse({ success: false });
+      }
+    })();
+    return true;
+  }
+
+  // Close all tabs in a branch's Chrome tab group (= Chrome's "Đóng nhóm")
+  if (message.type === 'CLOSE_TAB_GROUP') {
+    const { windowId: wid, branchName } = message.payload as { windowId: number; branchName: string };
+    (async () => {
+      try {
+        const groupId = await findGroupIdForBranch(wid, branchName);
+        if (groupId === -1) { sendResponse({ success: false }); return; }
+
+        const groupTabs = await chrome.tabs.query({ groupId });
+        const tabIds = groupTabs.map(t => t.id).filter((id): id is number => id != null);
+
+        if (tabIds.length > 0) {
+          await chrome.tabs.remove(tabIds);
+        }
+        console.log(`[Neuro-Nav] Closed group "${branchName}" (${tabIds.length} tabs)`);
         sendResponse({ success: true });
       } catch {
         sendResponse({ success: false });
@@ -607,6 +645,31 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   }
 });
 
+// ---- Keyboard Command: Close Active Tab Group (Alt+Shift+W) ----
+
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'close-active-group') return;
+
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id || activeTab.groupId == null || activeTab.groupId === -1) return;
+
+    const groupId = activeTab.groupId;
+
+    // Find all tabs in this group
+    const groupTabs = await chrome.tabs.query({ groupId });
+    const tabIds = groupTabs.map(t => t.id).filter((id): id is number => id != null);
+
+    if (tabIds.length === 0) return;
+
+    // Close all tabs in the group
+    await chrome.tabs.remove(tabIds);
+    console.log(`[Neuro-Nav] Closed group (${tabIds.length} tabs) via Alt+Shift+W`);
+  } catch (err) {
+    console.error('[Neuro-Nav] Close active group failed:', err);
+  }
+});
+
 // ---- Auto-Pruning Alarm ----
 
 const PRUNE_ALARM = 'neuro-nav-prune';
@@ -648,21 +711,16 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     const favicon = tab.favIconUrl ?? '';
     const category = classifyPage(details.url, title);
 
-    // Record as a graph node — resolve branch from tab's group (not window-level)
+    // Record as a graph node — resolve branch STRICTLY from tab's group.
+    // RULE 3: History must never cross group boundaries.
+    // If tab is not in a group, record under 'default' — do NOT fall back
+    // to window-level active branch (that would pollute other sessions).
     let branchName = 'default';
-    if (tab.windowId) {
-      if (tab.groupId != null && tab.groupId !== -1) {
-        // Tab is in a group — use the group's title as branch name
-        try {
-          const group = await chrome.tabGroups.get(tab.groupId);
-          if (group.title) branchName = group.title;
-        } catch { /* group may have been removed */ }
-      }
-      // Fallback: use window-level active branch if not in a group
-      if (branchName === 'default') {
-        const activeBranch = await branchOps.getActiveBranchForWindow(tab.windowId);
-        branchName = activeBranch?.name ?? 'default';
-      }
+    if (tab.groupId != null && tab.groupId !== -1) {
+      try {
+        const group = await chrome.tabGroups.get(tab.groupId);
+        if (group.title) branchName = group.title;
+      } catch { /* group may have been removed */ }
     }
     await recordPageVisit(details.url, title, favicon, category, branchName);
 
@@ -727,10 +785,12 @@ function debouncedSyncBranchTabs(windowId: number) {
       // Find the tab group matching this branch
       const groupId = await findGroupIdForBranch(windowId, activeBranch.name);
 
-      // Only sync tabs that belong to this branch's group (or all if no groups exist)
+      // STRICT ISOLATION: Only sync tabs that belong to this branch's group.
+      // If no Chrome group exists for this branch, sync only ungrouped tabs
+      // (groupId === -1) — NEVER steal tabs from other groups.
       const branchTabs = groupId !== -1
         ? allTabs.filter(t => t.groupId === groupId)
-        : allTabs;
+        : allTabs.filter(t => t.groupId == null || t.groupId === -1);
 
       const snapshots = branchTabs.map(fromChromeTab).map(toSnapshot);
       const updated = await branchOps.syncBranchTabs(windowId, snapshots);
@@ -749,9 +809,77 @@ chrome.tabs.onRemoved.addListener((_tabId, removeInfo) => {
   debouncedSyncBranchTabs(removeInfo.windowId);
 });
 
-// Tab created
-chrome.tabs.onCreated.addListener((tab) => {
-  if (tab.windowId) debouncedSyncBranchTabs(tab.windowId);
+// Tab created — auto-add to active branch's Chrome tab group.
+// RULES:
+//   1. New ungrouped tab → add to active branch's Chrome group (if exists)
+//   2. Tab being restored/opened as part of another group → NEVER touch
+//   3. Tab opened from a grouped tab (openerTabId in another group) → NEVER touch
+//
+// Strategy: wait 200ms for Chrome to finish its own grouping, then re-check.
+chrome.tabs.onCreated.addListener(async (tab) => {
+  if (!tab.windowId || !tab.id) return;
+
+  // Already in a group at creation time — just sync, don't move
+  if (tab.groupId != null && tab.groupId !== -1) {
+    debouncedSyncBranchTabs(tab.windowId);
+    return;
+  }
+
+  const tabId = tab.id;
+  const windowId = tab.windowId;
+
+  // If opened from a tab in a DIFFERENT group, don't auto-group.
+  // Chrome will assign it to the opener's group shortly.
+  // But if opener is in the SAME group as active branch → proceed (Ctrl+T case).
+  if (tab.openerTabId != null) {
+    try {
+      const openerTab = await chrome.tabs.get(tab.openerTabId);
+      if (openerTab.groupId != null && openerTab.groupId !== -1) {
+        const activeBranch = await branchOps.getActiveBranchForWindow(windowId);
+        const activeGroupId = activeBranch
+          ? await findGroupIdForBranch(windowId, activeBranch.name)
+          : -1;
+
+        if (openerTab.groupId !== activeGroupId) {
+          // Opener is in a DIFFERENT group — let Chrome handle it
+          debouncedSyncBranchTabs(windowId);
+          return;
+        }
+        // Opener is in the SAME group as active branch — fall through to auto-group
+      }
+    } catch { /* opener may have closed */ }
+  }
+
+  // Wait briefly for Chrome to finish any pending group assignment
+  // (e.g., restoring recently closed group, drag-to-group, etc.)
+  await new Promise(r => setTimeout(r, 200));
+
+  try {
+    // Re-fetch — Chrome may have assigned a group during the wait
+    const freshTab = await chrome.tabs.get(tabId);
+
+    // Chrome assigned it to a group → don't interfere
+    if (freshTab.groupId != null && freshTab.groupId !== -1) {
+      debouncedSyncBranchTabs(windowId);
+      return;
+    }
+
+    // Tab is genuinely new and ungrouped → add to active branch's group
+    const activeBranch = await branchOps.getActiveBranchForWindow(windowId);
+    if (!activeBranch) {
+      debouncedSyncBranchTabs(windowId);
+      return;
+    }
+
+    const groupId = await findGroupIdForBranch(windowId, activeBranch.name);
+    if (groupId !== -1) {
+      await chrome.tabs.group({ tabIds: [tabId], groupId });
+    }
+  } catch {
+    // Tab may have been closed during the delay — safe to ignore
+  }
+
+  debouncedSyncBranchTabs(windowId);
 });
 
 // Tab navigated (URL change complete)
@@ -1257,9 +1385,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!info.selectionText || !tab) return;
 
   try {
-    const windowId = tab.windowId ?? (await chrome.windows.getLastFocused()).id!;
-    const branch = await getActiveBranchForWindow(windowId);
-    const branchName = branch?.name ?? 'default';
+    // RULE 3: Resolve branch from tab's own group, not window-level
+    let branchName = 'default';
+    if (tab.groupId != null && tab.groupId !== -1) {
+      try {
+        const group = await chrome.tabGroups.get(tab.groupId);
+        if (group.title) branchName = group.title;
+      } catch { /* group removed */ }
+    }
 
     const snippet: SnippetEntity = {
       id: makeSnippetId(),

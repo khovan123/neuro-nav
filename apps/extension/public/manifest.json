@@ -51,6 +51,12 @@
         "mac": "Command+Shift+N"
       },
       "description": "Open Neuro-Nav"
+    },
+    "close-active-group": {
+      "suggested_key": {
+        "default": "Alt+Shift+W"
+      },
+      "description": "Close active tab group"
     }
   },
   "content_security_policy": {
