@@ -18,6 +18,26 @@ import { Badge } from '@/shared/ui/Badge';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { IconPlus, IconTrash, IconBranch, IconPlay, IconExternalLink } from '@/shared/ui/Icons';
 
+/** Ask the background to group all tabs in a window under a named Chrome Tab Group */
+async function requestSyncTabGroup(windowId: number, branchName: string): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'SYNC_TAB_GROUP',
+      payload: { windowId, branchName },
+    });
+  } catch { /* ignore if background is not ready */ }
+}
+
+/** Ask the background to ungroup all tabs in a window (remove Chrome Tab Group) */
+async function requestUngroupTabs(windowId: number): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'UNGROUP_TABS',
+      payload: { windowId },
+    });
+  } catch { /* ignore */ }
+}
+
 const DEFAULT_PREFIXES = ['space', 'feat', 'work', 'research', 'project', 'personal', 'temp'];
 
 /** Sanitize session name: lowercase, no slashes, spaces → dashes, trim leading/trailing dashes */
@@ -152,6 +172,8 @@ export function Branches() {
       const branch = await branchOps.createNewBranch(fullName, tabs, true, targetWid);
       dispatch(addBranch(branch));
       dispatch(setActiveBranchForWindow({ windowId: targetWid, branchName: branch.name }));
+      // Sync Chrome Tab Group
+      requestSyncTabGroup(targetWid, fullName);
       setNewBranchName('');
       // Persist custom prefix (stored without '/')
       if (isCustom && customPrefix.trim()) {
@@ -192,6 +214,8 @@ export function Branches() {
       }
 
       dispatch(setActiveBranchForWindow({ windowId: wid, branchName: name }));
+      // Sync Chrome Tab Group after checkout
+      requestSyncTabGroup(wid, name);
       // Reload branches from DB
       const updated = await branchOps.listBranches();
       dispatch(setBranches(updated));
@@ -222,12 +246,21 @@ export function Branches() {
   // Delete branch
   const handleDelete = useCallback(async (id: string) => {
     try {
+      // Find the branch to check if it's active in any window
+      const branch = branches.find(b => b.id === id);
+      const activeWindows = branch?.activeInWindows ?? [];
+
       await branchOps.deleteBranchById(id);
       dispatch(removeBranch(id));
+
+      // Ungroup tabs in all windows where this branch was active
+      for (const wid of activeWindows) {
+        requestUngroupTabs(wid);
+      }
     } catch (err) {
       console.error('Delete failed:', err);
     }
-  }, [dispatch]);
+  }, [dispatch, branches]);
 
   // Merge branch
   const handleMerge = useCallback(async (sourceName: string, targetName: string) => {
