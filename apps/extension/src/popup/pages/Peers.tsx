@@ -1,5 +1,5 @@
 /* ============================================================
-   PEERS PAGE — P2P collaboration management
+   TEAM PAGE — Collaboration management
    ============================================================ */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -90,7 +90,7 @@ export function Peers() {
     <div className="flex flex-col h-full overflow-y-auto">
       {/* My Peer ID */}
       <div className="px-3 py-3 border-b border-border-subtle">
-        <div className="text-[10px] text-text-tertiary mb-1">Your Peer ID</div>
+        <div className="text-[10px] text-text-tertiary mb-1">Your ID — share this to connect</div>
         <div className="flex items-center gap-2">
           <div className="flex-1 bg-surface-overlay px-2.5 py-1.5 rounded-md font-mono text-xs text-accent-secondary truncate">
             {myPeerId || '…'}
@@ -104,19 +104,19 @@ export function Peers() {
           </button>
         </div>
         {!initialized && (
-          <div className="mt-2 text-[10px] text-accent-warning animate-pulse">Connecting to signaling server…</div>
+          <div className="mt-2 text-[10px] text-accent-warning animate-pulse">Setting up connection…</div>
         )}
       </div>
 
       {/* Connect to peer */}
       <div className="px-3 py-3 border-b border-border-subtle">
-        <div className="text-[10px] text-text-tertiary mb-1">Connect to Peer</div>
+        <div className="text-[10px] text-text-tertiary mb-1">Connect to someone</div>
         <div className="flex items-center gap-2">
           <input
             value={connectId}
             onChange={(e) => setConnectId(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
-            placeholder="Enter peer ID…"
+            placeholder="Paste their ID here…"
             className="flex-1 bg-surface-overlay px-2.5 py-1.5 rounded-md text-xs text-text-primary placeholder:text-text-tertiary outline-none border border-transparent focus:border-accent-primary/40 transition-colors"
             id="peer-connect-input"
           />
@@ -137,16 +137,16 @@ export function Peers() {
       <div className="flex-1 px-3 py-2">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] font-medium text-text-tertiary uppercase tracking-wider">
-            Peers ({peers.filter((p) => p.status === 'connected').length})
+            Connected ({peers.filter((p) => p.status === 'connected').length})
           </span>
         </div>
 
         {peers.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-text-tertiary animate-fade-in">
             <IconPeers size={28} className="mb-2 opacity-30" />
-            <p className="text-xs text-center">No peers connected</p>
+            <p className="text-xs text-center">No one connected yet</p>
             <p className="text-[10px] mt-1 text-center px-4">
-              Share your Peer ID with a teammate, or enter theirs above to connect.
+              Share your ID with a teammate, or paste theirs above to connect.
             </p>
           </div>
         ) : (
@@ -173,14 +173,14 @@ export function Peers() {
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   <Badge variant={peer.status === 'connected' ? 'success' : 'default'}>
-                    {peer.status}
+                    {peer.status === 'connected' ? 'Online' : 'Offline'}
                   </Badge>
                   {peer.status === 'connected' && (
                     <button
                       onClick={() => handleShare(peer.peerId)}
                       className="px-2 py-1 text-[10px] font-medium rounded bg-accent-secondary/15 text-accent-secondary hover:bg-accent-secondary/25 transition-colors cursor-pointer"
                     >
-                      Share
+                      Share Tabs
                     </button>
                   )}
                   <button
@@ -204,7 +204,7 @@ export function Peers() {
       {incomingShares.length > 0 && (
         <div className="px-3 py-2 border-t border-border-subtle">
           <div className="text-[10px] font-medium text-accent-warning mb-1.5">
-            <IconInbox size={12} className="inline -mt-0.5" /> Incoming Workspaces ({incomingShares.length})
+            <IconInbox size={12} className="inline -mt-0.5" /> Shared with you ({incomingShares.length})
           </div>
           <div className="space-y-1.5">
             {incomingShares.map((share, i) => (

@@ -12,6 +12,8 @@ export interface BranchEntity {
   isActive: boolean;
   /** Window IDs where this branch is currently checked out */
   activeInWindows: number[];
+  /** AI-generated session summary (v2.0) */
+  lastSummary?: { text: string; generatedAt: number };
   createdAt: number;
   updatedAt: number;
 }

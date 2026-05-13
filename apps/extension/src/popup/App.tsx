@@ -10,18 +10,20 @@ import { Workspaces } from './pages/Workspaces';
 import { Branches } from './pages/Branches';
 import { BrowsingGraph } from './pages/BrowsingGraph';
 import { Peers } from './pages/Peers';
+import { Snippets } from './pages/Snippets';
 import { Settings } from './pages/Settings';
 import { CommandPalette } from './components/CommandPalette';
 import { AiStatusBar, AiStatusDot } from './components/AiStatusBar';
-import { IconTabs, IconGrid, IconBranch, IconGraph, IconPeers, IconSettings, IconSearch, IconShieldLock, IconAlertTriangle } from '@/shared/ui/Icons';
+import { IconTabs, IconGrid, IconBranch, IconGraph, IconPeers, IconScissors, IconSettings, IconSearch, IconShieldLock, IconAlertTriangle } from '@/shared/ui/Icons';
 import { Tooltip } from '@/shared/ui/Tooltip';
 
 const NAV_ITEMS: { page: NavPage; icon: typeof IconTabs; label: string; ready: boolean }[] = [
-  { page: 'tabs', icon: IconTabs, label: 'Active Tabs', ready: true },
+  { page: 'tabs', icon: IconTabs, label: 'Open Tabs', ready: true },
   { page: 'workspaces', icon: IconGrid, label: 'Workspaces', ready: true },
-  { page: 'branches', icon: IconBranch, label: 'Branches', ready: true },
-  { page: 'graph', icon: IconGraph, label: 'Graph', ready: true },
-  { page: 'peers', icon: IconPeers, label: 'Peers', ready: true },
+  { page: 'branches', icon: IconBranch, label: 'Sessions', ready: true },
+  { page: 'graph', icon: IconGraph, label: 'Web Map', ready: true },
+  { page: 'snippets', icon: IconScissors, label: 'Snippets', ready: true },
+  { page: 'peers', icon: IconPeers, label: 'Team', ready: true },
 ];
 
 function PageContent({ page }: { page: NavPage }) {
@@ -34,6 +36,8 @@ function PageContent({ page }: { page: NavPage }) {
       return <Branches />;
     case 'graph':
       return <BrowsingGraph />;
+    case 'snippets':
+      return <Snippets />;
     case 'peers':
       return <Peers />;
     case 'settings':
@@ -62,7 +66,7 @@ function SecretSetup({ onComplete }: { onComplete: () => void }) {
   const handleSubmit = useCallback(() => {
     const trimmed = key.trim();
     if (trimmed.length < 8) {
-      setError('Secret key must be at least 8 characters');
+      setError('Connection key must be at least 8 characters');
       return;
     }
     chrome.storage.local.set({ navSecret: trimmed }, () => {
@@ -205,7 +209,7 @@ export function App() {
       <nav className="w-12 flex flex-col items-center py-3 gap-1 border-r border-border-subtle bg-surface-raised/50">
         {/* Logo */}
         <div className="w-8 h-8 rounded-lg bg-accent-primary/20 flex items-center justify-center mb-3 animate-pulse-glow">
-          <span className="text-base font-bold text-gradient-primary">N</span>
+          <img src="/icons/icon-16.png" alt="Neuro-Nav" width={16} height={16} className="rounded-sm" />
         </div>
 
         {/* Nav items */}
@@ -286,10 +290,10 @@ export function App() {
 
         {/* Footer — status dots + version */}
         <footer className="flex items-center justify-end gap-2 px-3 py-1.5 border-t border-border-default bg-surface-primary/50">
-          <Tooltip content={daemonConnected ? 'Daemon: Connected' : 'Daemon: Disconnected'} position="left">
+          <Tooltip content={daemonConnected ? 'Server: Connected' : 'Server: Disconnected'} position="left">
             <span className={`w-2 h-2 rounded-full shrink-0 ${daemonConnected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-zinc-600'}`} />
           </Tooltip>
-          <Tooltip content="AI Model Status" position="left">
+          <Tooltip content="AI Status" position="left">
             <AiStatusDot />
           </Tooltip>
           <span className="text-[10px] font-mono text-text-tertiary bg-surface-overlay px-1.5 py-0.5 rounded">

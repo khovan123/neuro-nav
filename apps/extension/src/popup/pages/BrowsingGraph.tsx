@@ -255,9 +255,9 @@ export function BrowsingGraph() {
         {graphData && graphData.nodes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-text-tertiary animate-fade-in">
             <IconGraph size={36} className="mb-4 opacity-30" />
-            <h2 className="text-lg font-semibold text-text-primary">No graph data yet</h2>
+            <h2 className="text-lg font-semibold text-text-primary">Nothing here yet</h2>
             <p className="text-xs mt-1 text-center px-8">
-              Browse the web with the extension installed. Pages will appear here after 15 seconds of dwelling.
+              Browse the web and your visited sites will appear here as a visual map.
             </p>
           </div>
         ) : (
@@ -284,8 +284,8 @@ export function BrowsingGraph() {
             </div>
             <div className="flex items-center gap-3 mt-1 text-[10px] text-text-tertiary">
               <span>{hoveredNode.domain}</span>
-              <span>{hoveredNode.visits} visits</span>
-              <span>score: {hoveredNode.score.toFixed(1)}</span>
+              <span>{hoveredNode.visits} visit{hoveredNode.visits !== 1 ? 's' : ''}</span>
+              <span>relevance: {hoveredNode.score.toFixed(1)}</span>
             </div>
           </div>
         )}

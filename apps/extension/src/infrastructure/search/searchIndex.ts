@@ -162,14 +162,11 @@ export async function indexChunk(chunk: ChunkDocument): Promise<void> {
 
   const idx = await getIndex();
 
-  // Remove existing entry if updating
+  // Remove existing entry if updating (upsert)
   try {
-    const existing = await search(idx, { term: chunk.id, properties: ['id'], limit: 1 });
-    if (existing.hits.length > 0) {
-      await remove(idx, existing.hits[0].id);
-    }
+    await remove(idx, chunk.id);
   } catch {
-    // Not found — fine
+    // Not found — fine, inserting new doc
   }
 
   await insert(idx, {
@@ -359,4 +356,42 @@ export async function pruneOldPages(maxAgeDays = 30): Promise<number> {
       reject(req.error);
     };
   });
+}
+
+/**
+ * Reassign all chunks from `sourceBranch` to `targetBranch`.
+ * Updates both IDB persistence and the in-memory Orama index.
+ */
+export async function reassignChunksBranch(
+  sourceBranch: string,
+  targetBranch: string
+): Promise<number> {
+  // Update IDB
+  const db = await openIDB();
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const store = tx.objectStore(STORE_NAME);
+  const req = store.getAll();
+
+  const reassigned = await new Promise<number>((resolve, reject) => {
+    req.onsuccess = () => {
+      const chunks = req.result as ChunkDocument[];
+      let count = 0;
+      for (const chunk of chunks) {
+        if (chunk.branch === sourceBranch) {
+          chunk.branch = targetBranch;
+          store.put(chunk);
+          count++;
+        }
+      }
+      tx.oncomplete = () => { db.close(); resolve(count); };
+    };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+
+  // Rebuild Orama index to reflect changes (re-hydrate)
+  if (reassigned > 0 && oramaInstance) {
+    oramaInstance = null; // Force re-hydration on next getOrCreateIndex()
+  }
+
+  return reassigned;
 }

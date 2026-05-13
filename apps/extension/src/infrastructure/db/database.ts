@@ -6,6 +6,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { WorkspaceEntity } from '@/core/entities/Workspace';
 import type { BranchEntity } from '@/core/entities/Branch';
+import type { SnippetEntity } from '@/core/entities/SnippetEntity';
 
 // ---- Schema ----
 
@@ -41,10 +42,15 @@ interface NeuroNavDB extends DBSchema {
     };
     indexes: { 'by-visited': number; 'by-url': string };
   };
+  snippets: {
+    key: string;
+    value: SnippetEntity;
+    indexes: { 'by-branch': string; 'by-created': number; 'by-url': string };
+  };
 }
 
 const DB_NAME = 'neuro-nav';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbInstance: IDBPDatabase<NeuroNavDB> | null = null;
 
@@ -77,6 +83,14 @@ export async function getDB(): Promise<IDBPDatabase<NeuroNavDB>> {
         const hist = db.createObjectStore('history', { keyPath: 'id' });
         hist.createIndex('by-visited', 'visitedAt');
         hist.createIndex('by-url', 'url');
+      }
+
+      // Snippets store (v1.5)
+      if (!db.objectStoreNames.contains('snippets')) {
+        const snip = db.createObjectStore('snippets', { keyPath: 'id' });
+        snip.createIndex('by-branch', 'branch');
+        snip.createIndex('by-created', 'createdAt');
+        snip.createIndex('by-url', 'url');
       }
     },
   });
@@ -207,4 +221,26 @@ export async function pruneOldRecords(maxAgeDays = 30): Promise<number> {
 
   await tx.done;
   return deleted;
+}
+
+// ---- Snippet Operations (v1.5) ----
+
+export async function saveSnippet(snippet: SnippetEntity): Promise<void> {
+  const db = await getDB();
+  await db.put('snippets', snippet);
+}
+
+export async function getSnippetsByBranch(branch: string): Promise<SnippetEntity[]> {
+  const db = await getDB();
+  return db.getAllFromIndex('snippets', 'by-branch', branch);
+}
+
+export async function getAllSnippets(): Promise<SnippetEntity[]> {
+  const db = await getDB();
+  return db.getAllFromIndex('snippets', 'by-created');
+}
+
+export async function deleteSnippet(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('snippets', id);
 }

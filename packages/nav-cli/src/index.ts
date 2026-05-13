@@ -116,9 +116,11 @@ function usage() {
   console.log(`  ${c.cyan}init${c.reset}                     First-time setup (generate secret key)`);
   console.log(`  ${c.cyan}checkout <name>${c.reset}           Shorthand for branch checkout`);
   console.log(`  ${c.cyan}branch list${c.reset}              List all branches`);
-  console.log(`  ${c.cyan}branch checkout <name>${c.reset}   Switch to a branch`);
+  console.log(`  ${c.cyan}branch checkout <name>${c.reset}   Switch to a session`);
+  console.log(`  ${c.cyan}branch checkout <name> --new${c.reset}  Open session in a new window`);
   console.log(`  ${c.cyan}branch create <name>${c.reset}     Create and activate a new branch`);
   console.log(`  ${c.cyan}branch delete <id>${c.reset}       Delete a branch by ID`);
+  console.log(`  ${c.cyan}branch merge <s> <t>${c.reset}     Merge session <s> into <t>`);
   console.log(`  ${c.cyan}workspace list${c.reset}           List saved workspaces`);
   console.log(`  ${c.cyan}stash${c.reset}                    Stash current tabs`);
   console.log(`  ${c.cyan}stash pop${c.reset}                Pop the latest stash`);
@@ -214,8 +216,9 @@ async function handleBranch(args: string[]) {
 
   if (sub === 'checkout') {
     const name = args[1];
-    if (!name) { console.log(`${c.red}Usage: nav branch checkout <name>${c.reset}`); return; }
-    await doCheckout(name);
+    const newWindow = args.includes('--new');
+    if (!name) { console.log(`${c.red}Usage: nav branch checkout <name> [--new]${c.reset}`); return; }
+    await doCheckout(name, newWindow);
     return;
   }
 
@@ -236,17 +239,44 @@ async function handleBranch(args: string[]) {
     return;
   }
 
+  if (sub === 'merge') {
+    const source = args[1];
+    const target = args[2];
+    if (!source || !target) {
+      console.log(`${c.red}Usage: nav branch merge <source> <target> [--delete-source]${c.reset}`);
+      console.log(`${c.dim}  Merges tabs, history, and snippets from <source> into <target>${c.reset}`);
+      return;
+    }
+    const deleteSource = args.includes('--delete-source');
+    console.log(`${c.cyan}Merging ${c.bold}${source}${c.reset}${c.cyan} → ${c.bold}${target}${c.reset}...`);
+    const res = await sendCommand('BRANCH_MERGE', { source, target, deleteSource }) as {
+      data?: { name: string; tabs: unknown[] };
+      stats?: { chunks: number; snippets: number };
+    };
+    console.log(`${c.green}✓ Merged into ${c.bold}${res.data?.name}${c.reset}`);
+    console.log(`  ${c.dim}${res.data?.tabs?.length ?? 0} tabs total${c.reset}`);
+    if (res.stats) {
+      console.log(`  ${c.dim}${res.stats.chunks} history chunks + ${res.stats.snippets} snippets reassigned${c.reset}`);
+    }
+    if (deleteSource) {
+      console.log(`  ${c.dim}Source branch "${source}" deleted${c.reset}`);
+    }
+    return;
+  }
+
   console.log(`${c.red}Unknown branch subcommand: ${sub}${c.reset}`);
 }
 
-async function doCheckout(name: string) {
-  console.log(`${c.cyan}Checking out ${c.bold}${name}${c.reset}...`);
-  const res = await sendCommand('BRANCH_CHECKOUT', { name }) as { data?: { name: string }; success?: boolean; error?: string };
+async function doCheckout(name: string, newWindow = false) {
+  const cmd = newWindow ? 'BRANCH_CHECKOUT_NEW_WINDOW' : 'BRANCH_CHECKOUT';
+  const label = newWindow ? 'Opening in new window' : 'Checking out';
+  console.log(`${c.cyan}${label} ${c.bold}${name}${c.reset}...`);
+  const res = await sendCommand(cmd, { name }) as { data?: { name: string }; success?: boolean; error?: string };
   if (res.success === false) {
     console.log(`${c.red}✗ ${res.error ?? 'Checkout failed'}${c.reset}`);
     return;
   }
-  console.log(`${c.green}✓ Switched to ${c.bold}${res.data?.name}${c.reset}`);
+  console.log(`${c.green}✓ ${newWindow ? 'Opened' : 'Switched to'} ${c.bold}${res.data?.name}${c.reset}`);
 }
 
 async function handleStash(args: string[]) {
@@ -583,11 +613,12 @@ async function main(retried = false) {
 
   try {
     switch (command) {
-      // Shorthand: `nav checkout <name>`
+      // Shorthand: `nav checkout <name> [--new]`
       case 'checkout': {
         const name = args[1];
-        if (!name) { console.log(`${c.red}Usage: nav checkout <name>${c.reset}`); return; }
-        await doCheckout(name);
+        const newWindow = args.includes('--new');
+        if (!name) { console.log(`${c.red}Usage: nav checkout <name> [--new]${c.reset}`); return; }
+        await doCheckout(name, newWindow);
         break;
       }
 

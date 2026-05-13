@@ -23,6 +23,7 @@
   },
   "permissions": [
     "tabs",
+    "tabGroups",
     "storage",
     "unlimitedStorage",
     "alarms",
@@ -30,7 +31,8 @@
     "webNavigation",
     "scripting",
     "offscreen",
-    "nativeMessaging"
+    "nativeMessaging",
+    "contextMenus"
   ],
   "host_permissions": [
     "<all_urls>"

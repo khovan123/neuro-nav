@@ -18,6 +18,8 @@ export interface GraphNode {
   score: number;
   /** Cluster ID (domain-based) */
   cluster: string;
+  /** Branch this page was visited in */
+  branch?: string;
 }
 
 export interface GraphEdge {

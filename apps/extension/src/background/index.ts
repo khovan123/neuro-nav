@@ -3,11 +3,13 @@
    ============================================================ */
 
 import { createMessageRouter, MSG } from '@/shared/messaging';
-import { pruneOldRecords, getAllWorkspaces, getActiveBranchForWindow, saveWorkspace } from '@/infrastructure/db/database';
+import { pruneOldRecords, getAllWorkspaces, getActiveBranchForWindow, saveWorkspace, saveSnippet, getSnippetsByBranch, getAllSnippets, deleteSnippet } from '@/infrastructure/db/database';
+import type { SnippetEntity } from '@/core/entities/SnippetEntity';
+import { makeSnippetId } from '@/core/entities/SnippetEntity';
 import * as branchOps from '@/core/use-cases/manageBranches';
 import * as stashOps from '@/core/use-cases/stashMemory';
 import { processExtractedChunks } from '@/core/use-cases/pageIndexer';
-import { searchPages, getIndexCount, pruneOldPages, indexChunk } from '@/infrastructure/search/searchIndex';
+import { searchPages, getIndexCount, pruneOldPages, indexChunk, reassignChunksBranch } from '@/infrastructure/search/searchIndex';
 import { makeChunkId } from '@/core/entities/ChunkDocument';
 import { shouldBlock } from '@/core/use-cases/intentBlocker';
 import { recordPageVisit, recordNavigation, getGraphData } from '@/core/use-cases/graphBuilder';
@@ -15,6 +17,91 @@ import { classifyPage } from '@/core/entities/PageDocument';
 import { fromChromeTab, toSnapshot } from '@/core/entities/Tab';
 import type { ProjectContext } from '@/core/entities/ProjectContext';
 import { initEmbedding, onStatusChange, onProgress, getStatus, type AiModelStatus } from '@/infrastructure/ai/embeddingService';
+
+// ---- Utility Helpers ----
+
+/** Simple FNV-1a-like hash for URL keys in chrome.storage */
+function hashUrl(url: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < url.length; i++) {
+    hash ^= url.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+/** Prefix → Chrome Tab Group color mapping */
+const PREFIX_COLOR_MAP: Record<string, chrome.tabGroups.ColorEnum> = {
+  'space/': 'yellow',
+  'feat/': 'blue',
+  'work/': 'cyan',
+  'research/': 'green',
+  'project/': 'purple',
+  'personal/': 'orange',
+  'temp/': 'grey',
+};
+
+/** Map a branch name to a Tab Group color based on its prefix */
+function getBranchColor(name: string): chrome.tabGroups.ColorEnum {
+  for (const [prefix, color] of Object.entries(PREFIX_COLOR_MAP)) {
+    if (name.startsWith(prefix)) return color;
+  }
+  return 'grey';
+}
+
+/**
+ * Sync Chrome Tab Groups for a window after branch operations.
+ * Groups all tabs in the window under a labeled, color-coded group.
+ */
+async function syncTabGroup(windowId: number, branchName: string): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({ windowId });
+    const tabIds = tabs.map(t => t.id).filter((id): id is number => id != null);
+    if (tabIds.length === 0) return;
+
+    // Group all tabs
+    const groupId = await chrome.tabs.group({ tabIds, createProperties: { windowId } });
+
+    // Style the group
+    await chrome.tabGroups.update(groupId, {
+      title: branchName,
+      color: getBranchColor(branchName),
+      collapsed: false,
+    });
+  } catch (err) {
+    console.warn('[Neuro-Nav] Tab Group sync failed:', err);
+  }
+}
+
+/**
+ * Send a command to the CLI daemon via WebSocket and await a response.
+ * Returns null if daemon is not connected or timeout.
+ * Note: cliSocket is declared later in this file — forward ref works at runtime.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sendCliCommand(type: string, payload: unknown): Promise<any> {
+  return new Promise((resolve) => {
+    if (!cliSocket || cliSocket.readyState !== WebSocket.OPEN) {
+      resolve(null);
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const timeout = setTimeout(() => resolve(null), 5000);
+
+    const handler = (event: MessageEvent) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.requestId === requestId) {
+          clearTimeout(timeout);
+          cliSocket!.removeEventListener('message', handler);
+          resolve(msg.payload ?? msg);
+        }
+      } catch { /* ignore parse errors */ }
+    };
+    cliSocket.addEventListener('message', handler);
+    cliSocket.send(JSON.stringify({ source: 'extension', type, payload, requestId }));
+  });
+}
 
 // ---- Message Router ----
 
@@ -64,6 +151,8 @@ const router = createMessageRouter({
     const currentTabs = (await chrome.tabs.query({ windowId: wid }))
       .map(fromChromeTab).map(toSnapshot);
     const branch = await branchOps.createNewBranch(name, currentTabs, true, wid);
+    // Sync tab group after creating branch
+    syncTabGroup(wid, name).catch(() => {});
     return { success: true, data: branch };
   },
 
@@ -86,13 +175,64 @@ const router = createMessageRouter({
       }
     }
 
+    // Sync tab group after checkout
+    syncTabGroup(wid, name).catch(() => {});
+
     return { success: true, data: result.branch };
+  },
+
+  [MSG.BRANCH_CHECKOUT_NEW_WINDOW]: async (payload) => {
+    const { name } = payload as { name: string };
+    // Get the branch to read its saved tabs
+    const branches = await branchOps.listBranches();
+    const branch = branches.find((b) => b.name === name);
+    if (!branch) return { success: false, error: `Branch "${name}" not found` };
+
+    // Open a fresh window with the branch's tabs (or just new-tab if empty)
+    const urls = branch.tabs.map((t) => t.url).filter(Boolean);
+    const newWindow = await chrome.windows.create({
+      url: urls.length > 0 ? urls : ['chrome://newtab'],
+      focused: true,
+    });
+    const wid = newWindow.id!;
+
+    // Activate the branch in the new window
+    await branchOps.checkoutBranch(name, [], wid);
+    syncTabGroup(wid, name).catch(() => {});
+
+    return { success: true, data: branch };
   },
 
   [MSG.BRANCH_DELETE]: async (payload) => {
     const { id } = payload as { id: string };
     await branchOps.deleteBranchById(id);
     return { success: true };
+  },
+
+  [MSG.BRANCH_MERGE]: async (payload) => {
+    const { source, target, deleteSource } = payload as {
+      source: string; target: string; deleteSource?: boolean;
+    };
+
+    // 1. Merge branch tabs
+    const merged = await branchOps.mergeBranch(source, target, deleteSource);
+
+    // 2. Reassign search index chunks from source → target
+    const chunksReassigned = await reassignChunksBranch(source, target);
+
+    // 3. Reassign snippets from source → target
+    const sourceSnippets = await getSnippetsByBranch(source);
+    for (const snip of sourceSnippets) {
+      snip.branch = target;
+      await saveSnippet(snip);
+    }
+
+    console.log(
+      `[Neuro-Nav] Merged "${source}" → "${target}": ` +
+      `${merged.tabs.length} tabs, ${chunksReassigned} chunks, ${sourceSnippets.length} snippets`
+    );
+
+    return { success: true, data: merged };
   },
 
   [MSG.GET_WINDOW_BRANCH]: async (payload) => {
@@ -145,9 +285,104 @@ const router = createMessageRouter({
 
   // ---- Graph handler (Phase 4) ----
 
-  [MSG.GRAPH_DATA]: async () => {
-    const data = await getGraphData();
+  [MSG.GRAPH_DATA]: async (_payload, sender) => {
+    const windowId = sender.tab?.windowId ?? (await chrome.windows.getLastFocused()).id!;
+    const branch = await branchOps.getActiveBranchForWindow(windowId);
+    const branchName = branch?.name ?? 'default';
+    const data = await getGraphData(branchName);
     return { success: true, data };
+  },
+
+  // ---- Reading Progress handlers (v1.5) ----
+
+  [MSG.READING_PROGRESS]: async (payload) => {
+    const { url, percent } = payload as { url: string; percent: number };
+    const key = `rp_${hashUrl(url)}`;
+    await chrome.storage.local.set({ [key]: { url, percent, updatedAt: Date.now() } });
+    return { success: true };
+  },
+
+  [MSG.GET_READING_PROGRESS]: async (payload) => {
+    const { urls } = payload as { urls: string[] };
+    const keys = urls.map((u) => `rp_${hashUrl(u)}`);
+    const result = await chrome.storage.local.get(keys);
+    const progress: Record<string, number> = {};
+    for (const u of urls) {
+      const key = `rp_${hashUrl(u)}`;
+      if (result[key]) progress[u] = result[key].percent;
+    }
+    return { success: true, data: progress };
+  },
+
+  // ---- Snippet handlers (v1.5) ----
+
+  [MSG.SNIPPET_SAVE]: async (payload) => {
+    const { text, url, title, branch, note } = payload as {
+      text: string; url: string; title: string; branch: string; note?: string;
+    };
+    const snippet: SnippetEntity = {
+      id: makeSnippetId(),
+      text,
+      url,
+      title,
+      branch,
+      note: note ?? '',
+      createdAt: Date.now(),
+    };
+    await saveSnippet(snippet);
+    return { success: true, data: snippet };
+  },
+
+  [MSG.SNIPPET_LIST]: async (payload) => {
+    const { branch } = (payload ?? {}) as { branch?: string };
+    const snippets = branch ? await getSnippetsByBranch(branch) : await getAllSnippets();
+    return { success: true, data: snippets };
+  },
+
+  [MSG.SNIPPET_DELETE]: async (payload) => {
+    const { id } = payload as { id: string };
+    await deleteSnippet(id);
+    return { success: true };
+  },
+
+  // ---- Session Summary handlers (v2.0) ----
+
+  [MSG.SESSION_SUMMARY_GENERATE]: async (payload) => {
+    const { branchName } = payload as { branchName: string };
+    // Get recent indexed pages for this branch
+    const results = await searchPages('', 10, branchName);
+    const pageTexts = results.map((r) =>
+      `- ${r.title}: ${r.chunkText.slice(0, 120)}`
+    ).join('\n');
+
+    let summary: string;
+    if (cliSocket && cliSocket.readyState === WebSocket.OPEN) {
+      // Try LLM via daemon
+      try {
+        const resp = await sendCliCommand('SUMMARIZE', { text: pageTexts, branchName });
+        summary = resp?.summary ?? pageTexts;
+      } catch {
+        summary = pageTexts || 'No pages indexed in this session yet.';
+      }
+    } else {
+      // Extractive fallback
+      summary = pageTexts || 'No pages indexed in this session yet.';
+    }
+
+    // Save to branch metadata
+    const branch = (await branchOps.listBranches()).find(b => b.name === branchName);
+    if (branch) {
+      branch.lastSummary = { text: summary, generatedAt: Date.now() };
+      await branchOps.updateBranch(branch);
+    }
+
+    return { success: true, data: { summary } };
+  },
+
+  [MSG.SESSION_SUMMARY_GET]: async (payload) => {
+    const { branchName } = payload as { branchName: string };
+    const branch = (await branchOps.listBranches()).find(b => b.name === branchName);
+    return { success: true, data: branch?.lastSummary ?? null };
   },
 });
 
@@ -301,7 +536,9 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     const category = classifyPage(details.url, title);
 
     // Record as a graph node
-    await recordPageVisit(details.url, title, favicon, category);
+    const activeBranch = tab.windowId ? await branchOps.getActiveBranchForWindow(tab.windowId) : null;
+    const branchName = activeBranch?.name ?? 'default';
+    await recordPageVisit(details.url, title, favicon, category, branchName);
 
     // Record transition edge
     if (previousUrl && previousUrl !== details.url) {
@@ -435,9 +672,12 @@ async function handleProjectContextUpdate(ctx: ProjectContext): Promise<void> {
 const CLI_DEFAULT_URL = 'ws://127.0.0.1';
 const CLI_DEFAULT_PORT = '9500';
 const CLI_DEFAULT_TOKEN = 'neuro_nav_secure_token_2026';
-const CLI_RECONNECT_MS = 5_000;
+const CLI_RECONNECT_BASE_MS = 5_000;
+const CLI_RECONNECT_MAX_MS = 120_000; // 2 minutes max backoff
 const NATIVE_HOST_NAME = 'com.neuronav.daemon';
 let nativeStartAttempted = false;
+let consecutiveFailures = 0;
+let lastConnectAttempt = 0;
 
 /** Handlers for CLI commands — reuses the same logic as the popup message router. */
 const cliCommandHandlers: Record<string, (payload: unknown) => Promise<unknown>> = {
@@ -471,6 +711,21 @@ const cliCommandHandlers: Record<string, (payload: unknown) => Promise<unknown>>
     }
     return { success: true, data: result.branch };
   },
+  BRANCH_CHECKOUT_NEW_WINDOW: async (payload) => {
+    const { name } = payload as { name: string };
+    const branches = await branchOps.listBranches();
+    const branch = branches.find((b) => b.name === name);
+    if (!branch) return { success: false, error: `Branch "${name}" not found` };
+
+    const urls = branch.tabs.map((t) => t.url).filter(Boolean);
+    const newWindow = await chrome.windows.create({
+      url: urls.length > 0 ? urls : ['chrome://newtab'],
+      focused: true,
+    });
+    const wid = newWindow.id!;
+    await branchOps.checkoutBranch(name, [], wid);
+    return { success: true, data: branch };
+  },
   BRANCH_CREATE: async (payload) => {
     const { name } = payload as { name: string };
     const focusedWindow = await chrome.windows.getLastFocused({ populate: false });
@@ -484,6 +739,19 @@ const cliCommandHandlers: Record<string, (payload: unknown) => Promise<unknown>>
     const { id } = payload as { id: string };
     await branchOps.deleteBranchById(id);
     return { success: true };
+  },
+  BRANCH_MERGE: async (payload) => {
+    const { source, target, deleteSource } = payload as {
+      source: string; target: string; deleteSource?: boolean;
+    };
+    const merged = await branchOps.mergeBranch(source, target, deleteSource);
+    const chunksReassigned = await reassignChunksBranch(source, target);
+    const sourceSnippets = await getSnippetsByBranch(source);
+    for (const snip of sourceSnippets) {
+      snip.branch = target;
+      await saveSnippet(snip);
+    }
+    return { success: true, data: merged, stats: { chunks: chunksReassigned, snippets: sourceSnippets.length } };
   },
   WORKSPACE_LIST: async () => {
     const workspaces = await getAllWorkspaces();
@@ -514,7 +782,10 @@ const cliCommandHandlers: Record<string, (payload: unknown) => Promise<unknown>>
     return { success: true, data: results };
   },
   GRAPH_DATA: async () => {
-    const data = await getGraphData();
+    const lastWindow = await chrome.windows.getLastFocused({ populate: false });
+    const branch = await branchOps.getActiveBranchForWindow(lastWindow.id!);
+    const branchName = branch?.name ?? 'default';
+    const data = await getGraphData(branchName);
     return { success: true, data };
   },
   SCAN_PROJECT: async (payload) => {
@@ -545,24 +816,49 @@ async function getDaemonUrl(): Promise<string> {
   });
 }
 
+/** Compute backoff delay with exponential growth, capped at CLI_RECONNECT_MAX_MS. */
+function getReconnectDelay(): number {
+  const delay = Math.min(
+    CLI_RECONNECT_BASE_MS * Math.pow(2, consecutiveFailures),
+    CLI_RECONNECT_MAX_MS,
+  );
+  return delay;
+}
+
 async function connectToCLIServer() {
   // Don't reconnect if already connected or connecting
   if (cliSocket && (cliSocket.readyState === WebSocket.OPEN || cliSocket.readyState === WebSocket.CONNECTING)) {
     return;
   }
 
-  const token = await getSecretToken();
+  lastConnectAttempt = Date.now();
   const daemonUrl = await getDaemonUrl();
+
+  // Probe with fetch first — fetch failures don't produce browser console errors,
+  // unlike `new WebSocket()` which always logs ERR_CONNECTION_REFUSED.
+  const httpUrl = daemonUrl.replace('ws://', 'http://').replace('wss://', 'https://');
+  try {
+    await fetch(httpUrl, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
+  } catch {
+    // Server unreachable — skip WebSocket attempt to avoid browser error noise
+    consecutiveFailures++;
+    scheduleReconnect();
+    return;
+  }
+
+  const token = await getSecretToken();
 
   try {
     cliSocket = new WebSocket(daemonUrl, [token]);
   } catch {
+    consecutiveFailures++;
     scheduleReconnect();
     return;
   }
 
   cliSocket.onopen = () => {
     console.log('[Neuro-Nav] Connected to nav-server');
+    consecutiveFailures = 0; // Reset backoff on success
     if (cliReconnectTimer) {
       clearTimeout(cliReconnectTimer);
       cliReconnectTimer = null;
@@ -623,10 +919,10 @@ async function connectToCLIServer() {
   };
 
   cliSocket.onclose = () => {
-    console.log('[Neuro-Nav] Disconnected from nav-server');
     cliSocket = null;
     // Notify popup about daemon state
     chrome.storage.local.set({ daemonConnected: false });
+    consecutiveFailures++;
     scheduleReconnect();
   };
 
@@ -681,6 +977,7 @@ async function tryNativeStart(): Promise<boolean> {
 
 function scheduleReconnect() {
   if (cliReconnectTimer) return;
+  const delay = getReconnectDelay();
   cliReconnectTimer = setTimeout(async () => {
     cliReconnectTimer = null;
     // If first failure, try native start before reconnecting
@@ -692,7 +989,7 @@ function scheduleReconnect() {
       }
     }
     connectToCLIServer();
-  }, CLI_RECONNECT_MS);
+  }, delay);
 }
 
 // ---- Service Worker Keepalive (MV3) ----
@@ -708,8 +1005,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     // Touch the WebSocket to keep the connection alive
     if (cliSocket && cliSocket.readyState === WebSocket.OPEN) {
       cliSocket.send(JSON.stringify({ source: 'extension', type: 'HEARTBEAT' }));
-    } else {
-      connectToCLIServer();
+    } else if (!cliReconnectTimer) {
+      // Only attempt reconnect if enough time has passed since last attempt
+      const elapsed = Date.now() - lastConnectAttempt;
+      const nextDelay = getReconnectDelay();
+      if (elapsed >= nextDelay) {
+        connectToCLIServer();
+      }
     }
   }
 });
@@ -724,6 +1026,40 @@ chrome.runtime.onInstalled.addListener((details) => {
     console.log('[Neuro-Nav] Extension installed — v1.0.0');
   } else if (details.reason === 'update') {
     console.log(`[Neuro-Nav] Updated from ${details.previousVersion}`);
+  }
+
+  // Register context menu for snippets (v1.5)
+  chrome.contextMenus.create({
+    id: 'neuro-nav-save-snippet',
+    title: 'Save to Neuro-Nav',
+    contexts: ['selection'],
+  });
+});
+
+// ---- Context Menu Click Handler (Snippets v1.5) ----
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== 'neuro-nav-save-snippet') return;
+  if (!info.selectionText || !tab) return;
+
+  try {
+    const windowId = tab.windowId ?? (await chrome.windows.getLastFocused()).id!;
+    const branch = await getActiveBranchForWindow(windowId);
+    const branchName = branch?.name ?? 'default';
+
+    const snippet: SnippetEntity = {
+      id: makeSnippetId(),
+      text: info.selectionText,
+      url: tab.url ?? '',
+      title: tab.title ?? '',
+      branch: branchName,
+      note: '',
+      createdAt: Date.now(),
+    };
+    await saveSnippet(snippet);
+    console.log(`[Neuro-Nav] Snippet saved from ${tab.url} (branch: ${branchName})`);
+  } catch (err) {
+    console.error('[Neuro-Nav] Snippet save failed:', err);
   }
 });
 

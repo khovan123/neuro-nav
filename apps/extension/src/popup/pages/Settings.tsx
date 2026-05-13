@@ -51,7 +51,7 @@ export function Settings() {
   const handleSave = useCallback(() => {
     // Validate
     if (settings.navSecret.trim().length < 8) {
-      setError('Connection key must be at least 8 characters.');
+      setError('Key must be at least 8 characters.');
       return;
     }
     const port = Number(settings.navDaemonPort);
@@ -77,11 +77,11 @@ export function Settings() {
   const handleResetData = useCallback(async () => {
     const confirmed = window.confirm(
       '⚠️ WARNING: This will permanently delete:\n\n' +
-      '• All search index data (semantic chunks & vectors)\n' +
+      '• All search data\n' +
       '• Browsing history\n' +
       '• Saved workspaces\n' +
-      '• Tab stash entries\n\n' +
-      'Your branches will be preserved.\n\n' +
+      '• Saved tabs\n\n' +
+      'Your sessions will be preserved.\n\n' +
       'This action cannot be undone. Continue?'
     );
     if (!confirmed) return;
@@ -159,7 +159,7 @@ export function Settings() {
             <h2 className="text-xs font-semibold text-text-primary">Connection Key</h2>
           </div>
           <p className="text-[10px] text-text-tertiary leading-relaxed">
-            Must match the <code className="text-accent-primary font-mono text-[10px] bg-surface-overlay px-1 rounded">NAV_SECRET</code> set in your daemon. Run <code className="text-accent-primary font-mono text-[10px] bg-surface-overlay px-1 rounded">nav init</code> to generate one.
+            Paste the key shown when you set up the Neuro-Nav server. It keeps your connection secure.
           </p>
           <input
             id="settings-secret"
@@ -175,15 +175,15 @@ export function Settings() {
         <section className="glass-panel p-4 space-y-2.5">
           <div className="flex items-center gap-2">
             <IconGlobe size={15} className="text-accent-secondary" />
-            <h2 className="text-xs font-semibold text-text-primary">Daemon Address</h2>
+            <h2 className="text-xs font-semibold text-text-primary">Server Address</h2>
           </div>
           <p className="text-[10px] text-text-tertiary leading-relaxed">
-            Where the Neuro-Nav daemon is running. Default works for most setups.
+            Where the Neuro-Nav server is running. The default works for most setups.
           </p>
 
           <div className="flex gap-2">
             <div className="flex-1">
-              <label className="text-[10px] text-text-tertiary mb-0.5 block">Host</label>
+              <label className="text-[10px] text-text-tertiary mb-0.5 block">Address</label>
               <input
                 id="settings-host"
                 type="text"
@@ -237,8 +237,8 @@ export function Settings() {
             <h2 className="text-xs font-semibold text-accent-danger">Danger Zone</h2>
           </div>
           <p className="text-[10px] text-text-tertiary leading-relaxed">
-            Clear search index, history, workspaces & stash.
-            <span className="text-accent-primary"> Branches will be preserved.</span>
+            Clear search data, history, workspaces & saved tabs.
+            <span className="text-accent-primary"> Your sessions will be preserved.</span>
           </p>
           <button
             id="reset-data-btn"
@@ -252,7 +252,7 @@ export function Settings() {
 
         {/* Footer hint */}
         <p className="text-[10px] text-text-tertiary text-center leading-snug">
-          After saving, the extension will reconnect automatically.
+          Changes are applied instantly — no need to restart.
         </p>
       </div>
     </div>

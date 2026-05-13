@@ -127,6 +127,60 @@
     } else {
       setTimeout(runExtraction, 100);
     }
+
+    // Start reading progress tracking after dwell
+    startProgressTracking();
+  }
+
+  /** Track scroll depth and report reading progress to background. */
+  let progressTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastReportedPercent = 0;
+
+  function startProgressTracking() {
+    const reportProgress = () => {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const docHeight = Math.max(
+        document.documentElement.scrollHeight,
+        document.body.scrollHeight
+      );
+      const viewportHeight = window.innerHeight;
+
+      // For short pages, consider them fully read
+      if (docHeight <= viewportHeight) {
+        sendProgress(100);
+        return;
+      }
+
+      const percent = Math.min(100, Math.round(
+        ((scrollTop + viewportHeight) / docHeight) * 100
+      ));
+
+      // Only report if progress increased by at least 5%
+      if (percent > lastReportedPercent + 4) {
+        lastReportedPercent = percent;
+        sendProgress(percent);
+      }
+    };
+
+    function sendProgress(percent: number) {
+      if (!chrome.runtime?.id) return;
+      chrome.runtime.sendMessage({
+        type: 'READING_PROGRESS',
+        payload: { url: window.location.href, percent },
+      }).catch(() => {});
+    }
+
+    // Throttled scroll handler
+    window.addEventListener('scroll', () => {
+      if (progressTimer) return;
+      progressTimer = setTimeout(() => {
+        progressTimer = null;
+        reportProgress();
+      }, 5000);
+    }, { passive: true });
+
+    // Report initial position
+    reportProgress();
   }
 
   /** Start the dwell timer. */

@@ -32,11 +32,30 @@ function copyOnnxWasm() {
   };
 }
 
+// Inline plugin: downgrade noisy third-party warnings to console.log
+function quietTransformersWarnings() {
+  return {
+    name: 'quiet-transformers-warnings',
+    transform(code: string, id: string) {
+      if (!id.includes('transformers') && !id.includes('hub')) return null;
+      if (!code.includes('Unable to determine content-length')) return null;
+      return {
+        code: code.replace(
+          `console.warn('Unable to determine content-length from response headers. Will expand buffer when needed.')`,
+          `console.log('[AI] Content-length not in headers — expanding buffer dynamically.')`,
+        ),
+        map: null,
+      };
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
     copyOnnxWasm(),
+    quietTransformersWarnings(),
   ],
   resolve: {
     alias: {
@@ -67,7 +86,8 @@ export default defineConfig({
       },
     },
     target: 'esnext',
-    minify: false,
+    minify: true,
+    chunkSizeWarningLimit: 1000, // embedding-worker is ~870KB (ML library, can't split)
     sourcemap: true,
   },
 });

@@ -167,3 +167,43 @@ export async function syncBranchTabs(
   await db.saveBranch(branch);
   return branch;
 }
+
+/** Update a branch entity (e.g. metadata like lastSummary). */
+export async function updateBranch(branch: BranchEntity): Promise<void> {
+  branch.updatedAt = Date.now();
+  await db.saveBranch(branch);
+}
+
+/**
+ * Merge source branch INTO target branch.
+ * - Combines tabs (target's tabs first, then source's unique tabs).
+ * - Returns the updated target branch.
+ * - Optionally deletes the source branch after merge.
+ */
+export async function mergeBranch(
+  sourceName: string,
+  targetName: string,
+  deleteSource = false
+): Promise<BranchEntity> {
+  const branches = await db.getAllBranches();
+  const source = branches.find((b) => b.name === sourceName);
+  const target = branches.find((b) => b.name === targetName);
+
+  if (!source) throw new Error(`Source branch "${sourceName}" not found`);
+  if (!target) throw new Error(`Target branch "${targetName}" not found`);
+  if (source.name === target.name) throw new Error('Cannot merge a branch into itself');
+
+  // Merge tabs: keep target's tabs, append source's unique tabs (deduplicate by URL)
+  const existingUrls = new Set(target.tabs.map((t) => t.url));
+  const newTabs = source.tabs.filter((t) => !existingUrls.has(t.url));
+  target.tabs = [...target.tabs, ...newTabs];
+  target.updatedAt = Date.now();
+  await db.saveBranch(target);
+
+  // Optionally delete source branch (only if not active in any window)
+  if (deleteSource && !(source.activeInWindows?.length > 0)) {
+    await db.deleteBranch(source.id);
+  }
+
+  return target;
+}

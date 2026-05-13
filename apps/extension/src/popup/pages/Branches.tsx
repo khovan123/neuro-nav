@@ -1,8 +1,8 @@
 /* ============================================================
-   BRANCHES PAGE — Git-inspired session branching UI
+   SESSIONS PAGE — Session management UI
    ============================================================ */
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import {
   setBranches, addBranch, removeBranch, setActiveBranch,
@@ -16,9 +16,20 @@ import { Button } from '@/shared/ui/Button';
 import { Input } from '@/shared/ui/Input';
 import { Badge } from '@/shared/ui/Badge';
 import { Tooltip } from '@/shared/ui/Tooltip';
-import { IconPlus, IconTrash, IconBranch, IconPlay } from '@/shared/ui/Icons';
+import { IconPlus, IconTrash, IconBranch, IconPlay, IconExternalLink } from '@/shared/ui/Icons';
 
-const DEFAULT_PREFIXES = ['feat/', 'bug/', 'hotfix/', 'chore/', 'release/'];
+const DEFAULT_PREFIXES = ['space', 'feat', 'work', 'research', 'project', 'personal', 'temp'];
+
+/** Sanitize session name: lowercase, no slashes, spaces → dashes, trim leading/trailing dashes */
+function sanitizeName(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/\//g, '')     // strip slashes
+    .replace(/\s+/g, '-')   // spaces → dashes
+    .replace(/[^a-z0-9\-_.]/g, '') // keep only safe chars
+    .replace(/-{2,}/g, '-') // collapse double dashes
+    .replace(/^-+|-+$/g, ''); // trim leading/trailing dashes
+}
 const CUSTOM_PREFIX_KEY = 'neuro-nav-custom-prefixes';
 
 function loadCustomPrefixes(): string[] {
@@ -27,9 +38,11 @@ function loadCustomPrefixes(): string[] {
 }
 
 function saveCustomPrefix(p: string) {
+  const clean = p.replace(/\//g, '').trim().toLowerCase();
+  if (!clean) return;
   const existing = loadCustomPrefixes();
-  if (!existing.includes(p)) {
-    existing.push(p);
+  if (!existing.includes(clean)) {
+    existing.push(clean);
     localStorage.setItem(CUSTOM_PREFIX_KEY, JSON.stringify(existing));
   }
 }
@@ -38,17 +51,23 @@ export function Branches() {
   const dispatch = useAppDispatch();
   const { items: branches, activeBranchName } = useAppSelector((s) => s.branches);
   const { items: stashEntries } = useAppSelector((s) => s.stash);
-  const [prefix, setPrefix] = useState('feat/');
+  const [prefix, setPrefix] = useState('space');
+  const [duplicateError, setDuplicateError] = useState('');
   const [customPrefix, setCustomPrefix] = useState('');
   const [isCustom, setIsCustom] = useState(false);
   const [customPrefixes, setCustomPrefixes] = useState<string[]>(loadCustomPrefixes);
   const [newBranchName, setNewBranchName] = useState('');
   const [creating, setCreating] = useState(false);
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
+  const [merging, setMerging] = useState<string | null>(null);  // branch name being merged
+  const [mergeTarget, setMergeTarget] = useState<string>('');
   const [windowId, setWindowId] = useState<number | null>(null);
 
   const allPrefixes = [...DEFAULT_PREFIXES, ...customPrefixes];
-  const activePrefix = isCustom ? (customPrefix.endsWith('/') ? customPrefix : customPrefix + '/') : prefix;
+  // Auto-append '/' only when a category is selected — user never types it
+  const activePrefix = isCustom
+    ? (customPrefix.replace(/\//g, '').trim().toLowerCase() + '/')
+    : (prefix + '/');
 
   // Resolve current window ID on mount
   useEffect(() => {
@@ -97,26 +116,49 @@ export function Branches() {
 
   // Create branch
   const handleCreate = useCallback(async () => {
-    if (!newBranchName.trim()) return;
+    const cleaned = sanitizeName(newBranchName);
+    if (!cleaned) return;
+
+    // Check for duplicate name before creating
+    const fullName = `${activePrefix}${cleaned}`;
+    if (branches.some((b) => b.name === fullName)) {
+      setDuplicateError(`"${fullName}" already exists`);
+      return;
+    }
+
+    setDuplicateError('');
     setCreating(true);
     try {
-      const fullName = `${activePrefix}${newBranchName.trim()}`;
-      const currentTabs = await getCurrentTabs();
-      const branch = await branchOps.createNewBranch(fullName, currentTabs, true, windowId ?? undefined);
-      dispatch(addBranch(branch));
-      if (windowId) {
-        dispatch(setActiveBranchForWindow({ windowId, branchName: branch.name }));
+      const currentWid = windowId ?? (await chrome.windows.getCurrent()).id!;
+      const hasActiveBranch = branches.some(
+        (b) => b.activeInWindows?.includes(currentWid)
+      );
+
+      let targetWid: number;
+      let tabs: ReturnType<typeof toSnapshot>[];
+
+      if (hasActiveBranch) {
+        // A branch is already active here → open a fresh window so histories stay separate
+        const newWindow = await chrome.windows.create({ url: 'chrome://newtab' });
+        targetWid = newWindow.id!;
+        const freshTabs = await chrome.tabs.query({ windowId: targetWid });
+        tabs = freshTabs.map(fromChromeTab).map(toSnapshot);
       } else {
-        dispatch(setActiveBranch(branch.name));
+        // No active branch in this window → create branch with current tabs
+        targetWid = currentWid;
+        tabs = await getCurrentTabs();
       }
+
+      const branch = await branchOps.createNewBranch(fullName, tabs, true, targetWid);
+      dispatch(addBranch(branch));
+      dispatch(setActiveBranchForWindow({ windowId: targetWid, branchName: branch.name }));
       setNewBranchName('');
-      // Persist custom prefix
+      // Persist custom prefix (stored without '/')
       if (isCustom && customPrefix.trim()) {
-        const normalized = customPrefix.trim().endsWith('/') ? customPrefix.trim() : customPrefix.trim() + '/';
-        saveCustomPrefix(normalized);
+        saveCustomPrefix(customPrefix);
         setCustomPrefixes(loadCustomPrefixes());
         setIsCustom(false);
-        setPrefix(normalized);
+        setPrefix(customPrefix.replace(/\//g, '').trim().toLowerCase());
         setCustomPrefix('');
       }
     } catch (err) {
@@ -124,7 +166,7 @@ export function Branches() {
     } finally {
       setCreating(false);
     }
-  }, [newBranchName, activePrefix, isCustom, customPrefix, dispatch, getCurrentTabs]);
+  }, [newBranchName, activePrefix, branches, windowId, isCustom, customPrefix, dispatch, getCurrentTabs]);
 
   // Checkout branch
   const handleCheckout = useCallback(async (name: string) => {
@@ -160,6 +202,23 @@ export function Branches() {
     }
   }, [dispatch, getCurrentTabs]);
 
+  // Checkout branch in a NEW window
+  const handleCheckoutNewWindow = useCallback(async (name: string) => {
+    setCheckingOut(name);
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'BRANCH_CHECKOUT_NEW_WINDOW',
+        payload: { name },
+      });
+      const updated = await branchOps.listBranches();
+      dispatch(setBranches(updated));
+    } catch (err) {
+      console.error('Open in new window failed:', err);
+    } finally {
+      setCheckingOut(null);
+    }
+  }, [dispatch]);
+
   // Delete branch
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -167,6 +226,24 @@ export function Branches() {
       dispatch(removeBranch(id));
     } catch (err) {
       console.error('Delete failed:', err);
+    }
+  }, [dispatch]);
+
+  // Merge branch
+  const handleMerge = useCallback(async (sourceName: string, targetName: string) => {
+    if (!targetName || sourceName === targetName) return;
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'BRANCH_MERGE',
+        payload: { source: sourceName, target: targetName, deleteSource: false },
+      });
+      // Reload branches
+      const updated = await branchOps.listBranches();
+      dispatch(setBranches(updated));
+      setMerging(null);
+      setMergeTarget('');
+    } catch (err) {
+      console.error('Merge failed:', err);
     }
   }, [dispatch]);
 
@@ -210,28 +287,28 @@ export function Branches() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Active branch indicator */}
+      {/* Active session indicator */}
       <div className="p-3 border-b border-border-subtle">
         <div className="flex items-center gap-2 mb-2">
           <IconBranch size={14} className="text-accent-primary" />
-          <span className="text-xs text-text-tertiary">Current branch</span>
+          <span className="text-xs text-text-tertiary">Current session</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-text-primary font-mono">
-            {activeBranchName ?? 'No branch'}
+            {activeBranchName ?? 'No active session'}
           </span>
           {activeBranchName && <Badge variant="success">active</Badge>}
         </div>
       </div>
 
-      {/* Create branch */}
+      {/* Create session */}
       <div className="p-3 border-b border-border-subtle">
         <div className="flex items-center gap-1.5">
           {isCustom ? (
             <input
               value={customPrefix}
-              onChange={(e) => setCustomPrefix(e.target.value)}
-              placeholder="prefix/"
+              onChange={(e) => setCustomPrefix(e.target.value.replace(/\//g, '').toLowerCase())}
+              placeholder="category"
               autoFocus
               className="bg-surface-overlay text-accent-secondary text-xs font-mono font-semibold
                          w-20 px-2 py-[7px] rounded-l-md border border-border-subtle
@@ -260,15 +337,15 @@ export function Branches() {
               id="branch-prefix-select"
             >
               {allPrefixes.map((p) => (
-                <option key={p} value={p}>{p}</option>
+                <option key={p} value={p}>{p}/</option>
               ))}
               <option value="__custom__">Custom…</option>
             </select>
           )}
           <Input
-            placeholder="branch-name"
+            placeholder="session name"
             value={newBranchName}
-            onChange={(e) => setNewBranchName(e.target.value)}
+            onChange={(e) => { setNewBranchName(sanitizeName(e.target.value)); setDuplicateError(''); }}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             className="flex-1 font-mono text-xs rounded-l-none! border-l-0!"
             id="branch-name-input"
@@ -284,20 +361,25 @@ export function Branches() {
             Create
           </Button>
         </div>
+        {duplicateError && (
+          <p className="text-[11px] text-red-400 mt-1.5 px-1 animate-fade-in">
+            ⚠ {duplicateError}
+          </p>
+        )}
       </div>
 
-      {/* Branch list + Stash */}
+      {/* Session list + Saved tabs */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        {/* Branches */}
+        {/* Sessions */}
         <div>
           <h3 className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider px-1 mb-2">
-            Branches ({branches.length})
+            Sessions ({branches.length})
           </h3>
           {branches.length === 0 ? (
             <div className="text-center py-8 text-text-tertiary">
               <IconBranch size={28} className="mx-auto mb-2 opacity-30" />
-              <p className="text-xs">No branches yet</p>
-              <p className="text-[11px] mt-1">Create one to start managing sessions</p>
+              <p className="text-xs">No sessions yet</p>
+              <p className="text-[11px] mt-1">Create one to organise your tabs</p>
             </div>
           ) : (
             <div className="space-y-1">
@@ -307,8 +389,8 @@ export function Branches() {
                 const isActiveAnywhere = (branch.activeInWindows?.length ?? 0) > 0;
 
                 return (
+                <React.Fragment key={branch.id}>
                 <div
-                  key={branch.id}
                   className={[
                     'flex items-center gap-2 px-2.5 py-2 rounded-lg',
                     'transition-all duration-(--duration-fast)',
@@ -331,8 +413,8 @@ export function Branches() {
                     </span>
                     <span className="text-[10px] text-text-tertiary">
                       {branch.tabs.length} tabs · {new Date(branch.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      {isActiveHere && ' · active here'}
-                      {otherWindowCount > 0 && ` · active in ${otherWindowCount} other window${otherWindowCount > 1 ? 's' : ''}`}
+                      {isActiveHere && ' · in use here'}
+                      {otherWindowCount > 0 && ` · open in ${otherWindowCount} other window${otherWindowCount > 1 ? 's' : ''}`}
                     </span>
                   </div>
                   {!isActiveHere && (
@@ -342,11 +424,29 @@ export function Branches() {
                       loading={checkingOut === branch.name}
                       onClick={() => handleCheckout(branch.name)}
                     >
-                      Checkout
+                      Switch
                     </Button>
                   )}
+                  <Tooltip content="Open in new window">
+                    <button
+                      onClick={() => handleCheckoutNewWindow(branch.name)}
+                      className="p-1 rounded text-text-tertiary hover:text-accent-primary hover:bg-accent-primary/10 transition-colors cursor-pointer"
+                    >
+                      <IconExternalLink size={12} />
+                    </button>
+                  </Tooltip>
+                  {branches.length > 1 && merging !== branch.name && (
+                    <Tooltip content="Merge into another session">
+                      <button
+                        onClick={() => { setMerging(branch.name); setMergeTarget(''); }}
+                        className="p-1 rounded text-text-tertiary hover:text-accent-secondary hover:bg-accent-secondary/10 transition-colors cursor-pointer"
+                      >
+                        <IconBranch size={12} />
+                      </button>
+                    </Tooltip>
+                  )}
                   {!isActiveAnywhere && (
-                    <Tooltip content="Delete branch">
+                    <Tooltip content="Delete session">
                       <button
                         onClick={() => handleDelete(branch.id)}
                         className="p-1 rounded text-text-tertiary hover:text-accent-danger hover:bg-accent-danger/10 transition-colors cursor-pointer"
@@ -356,21 +456,53 @@ export function Branches() {
                     </Tooltip>
                   )}
                 </div>
+                {merging === branch.name && (
+                  <div className="flex items-center gap-1.5 mt-1.5 pl-5 animate-fade-in">
+                    <span className="text-[10px] text-text-tertiary shrink-0">Merge into</span>
+                    <select
+                      value={mergeTarget}
+                      onChange={(e) => setMergeTarget(e.target.value)}
+                      className="flex-1 bg-surface-overlay text-xs font-mono text-text-primary
+                                 px-2 py-1 rounded border border-border-subtle
+                                 outline-none focus:border-accent-primary/40 transition-colors
+                                 appearance-none cursor-pointer"
+                    >
+                      <option value="">Select target…</option>
+                      {branches.filter((b) => b.name !== branch.name).map((b) => (
+                        <option key={b.id} value={b.name}>{b.name}</option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="primary" size="sm"
+                      disabled={!mergeTarget}
+                      onClick={() => handleMerge(branch.name, mergeTarget)}
+                    >
+                      Merge
+                    </Button>
+                    <button
+                      onClick={() => setMerging(null)}
+                      className="p-1 rounded text-text-tertiary hover:text-text-primary transition-colors cursor-pointer text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+                </React.Fragment>
                 );
               })}
             </div>
           )}
         </div>
 
-        {/* Stash section */}
+        {/* Saved tabs section */}
         <div>
           <div className="flex items-center justify-between px-1 mb-2">
             <h3 className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
-              Stash ({stashEntries.length})
+              Saved Tabs ({stashEntries.length})
             </h3>
             <div className="flex gap-1">
               <Button variant="secondary" size="sm" onClick={handleStash} id="stash-push-btn">
-                Stash
+                Save Aside
               </Button>
               <Button
                 variant="primary" size="sm"
@@ -378,12 +510,12 @@ export function Branches() {
                 disabled={stashEntries.length === 0}
                 id="stash-pop-btn"
               >
-                Pop
+                Restore
               </Button>
             </div>
           </div>
           {stashEntries.length === 0 ? (
-            <p className="text-xs text-text-tertiary text-center py-4">Stash is empty</p>
+            <p className="text-xs text-text-tertiary text-center py-4">No saved tabs yet</p>
           ) : (
             <div className="space-y-1">
               {[...stashEntries].reverse().map((entry, i) => (
@@ -394,7 +526,7 @@ export function Branches() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-text-secondary">
-                      {entry.tabs.length} tabs stashed
+                      {entry.tabs.length} tabs saved
                     </span>
                     <span className="text-[10px] text-text-tertiary">
                       {new Date(entry.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}

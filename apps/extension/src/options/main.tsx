@@ -25,11 +25,11 @@ function OptionsApp() {
   const handleResetData = useCallback(async () => {
     const confirmed = window.confirm(
       '⚠️ WARNING: This will permanently delete:\n\n' +
-      '• All search index data (semantic chunks & vectors)\n' +
+      '• All search data\n' +
       '• Browsing history\n' +
       '• Saved workspaces\n' +
-      '• Tab stash entries\n\n' +
-      'Your branches will be preserved.\n\n' +
+      '• Saved tabs\n\n' +
+      'Your sessions will be preserved.\n\n' +
       'This action cannot be undone. Continue?'
     );
     if (!confirmed) return;
@@ -108,7 +108,7 @@ function OptionsApp() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-text-primary">Neuro-Nav Settings</h1>
-            <p className="text-xs text-text-tertiary">The Developer's Micro-OS</p>
+            <p className="text-xs text-text-tertiary">Your Tab Management Assistant</p>
           </div>
         </div>
 
@@ -118,8 +118,8 @@ function OptionsApp() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-text-primary">Auto-Pruning</p>
-                <p className="text-xs text-text-tertiary">Clean history older than 30 days</p>
+                <p className="text-sm text-text-primary">Auto-Cleanup</p>
+                <p className="text-xs text-text-tertiary">Automatically remove old browsing history</p>
               </div>
               <label className="relative inline-flex cursor-pointer">
                 <input type="checkbox" defaultChecked className="sr-only peer" />
@@ -129,8 +129,8 @@ function OptionsApp() {
 
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-text-primary">Retention Period</p>
-                <p className="text-xs text-text-tertiary">Days to keep history data</p>
+                <p className="text-sm text-text-primary">History Duration</p>
+                <p className="text-xs text-text-tertiary">How many days to keep your browsing data</p>
               </div>
               <input type="number" defaultValue={30} min={1} max={365} className="w-16 bg-surface-overlay border border-border-subtle rounded-md px-2 py-1 text-sm text-text-primary text-center outline-none focus:border-accent-primary" />
             </div>
@@ -142,8 +142,8 @@ function OptionsApp() {
 
           <div className="space-y-3">
             <div>
-              <p className="text-sm text-text-primary">Daemon Secret Token</p>
-              <p className="text-xs text-text-tertiary mb-2">Must match NAV_SECRET in your .env file</p>
+              <p className="text-sm text-text-primary">Connection Key</p>
+              <p className="text-xs text-text-tertiary mb-2">Paste the key from your Neuro-Nav server setup</p>
             </div>
             <div className="flex gap-2">
               <input
@@ -151,7 +151,7 @@ function OptionsApp() {
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                placeholder="Paste your NAV_SECRET here"
+                placeholder="Paste your connection key here"
                 className="flex-1 bg-surface-overlay border border-border-subtle rounded-md px-3 py-1.5 text-sm text-text-primary font-mono outline-none focus:border-accent-primary"
               />
               <button
@@ -162,7 +162,7 @@ function OptionsApp() {
               </button>
             </div>
             <p className="text-xs text-text-tertiary">
-              After saving, reload the extension to apply the new token.
+              After saving, reload the extension to apply the new key.
             </p>
           </div>
         </div>
@@ -174,8 +174,8 @@ function OptionsApp() {
             <div>
               <p className="text-sm text-text-primary">Reset All Data</p>
               <p className="text-xs text-text-tertiary">
-                Clear search index, history, workspaces & stash.
-                <span className="text-accent-primary"> Branches will be preserved.</span>
+                Clear search data, history, workspaces & saved tabs.
+                <span className="text-accent-primary"> Your sessions will be preserved.</span>
               </p>
             </div>
             <button

@@ -13,7 +13,8 @@ export async function recordPageVisit(
   url: string,
   title: string,
   favicon: string,
-  category: string
+  category: string,
+  branch: string = 'default'
 ): Promise<void> {
   // Skip non-http
   if (!url.startsWith('http')) return;
@@ -32,6 +33,7 @@ export async function recordPageVisit(
     lastVisit: Date.now(),
     score: 0, // computed below
     cluster: domain, // cluster by domain
+    branch,
   };
 
   // Get edge count for this node
@@ -55,22 +57,32 @@ export async function recordNavigation(fromUrl: string, toUrl: string): Promise<
  * Get the full graph data for visualization.
  * Returns nodes with re-computed scores and edges.
  */
-export async function getGraphData(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
-  const [nodes, edges] = await Promise.all([
+export async function getGraphData(branch?: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  const [allNodes, edges] = await Promise.all([
     graphStore.getAllNodes(),
     graphStore.getAllEdges(),
   ]);
 
+  // Filter nodes by branch if specified
+  const nodes = branch
+    ? allNodes.filter((n) => n.branch === branch)
+    : allNodes;
+
   // Re-compute scores with current edge data
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const filteredEdges = branch
+    ? edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+    : edges;
+
   for (const node of nodes) {
-    const linkCount = edges.filter((e) => e.source === node.id || e.target === node.id).length;
+    const linkCount = filteredEdges.filter((e) => e.source === node.id || e.target === node.id).length;
     node.score = computeScore(node.visits, node.lastVisit, linkCount);
   }
 
   // Sort by score descending
   nodes.sort((a, b) => b.score - a.score);
 
-  return { nodes, edges };
+  return { nodes, edges: filteredEdges };
 }
 
 /**
