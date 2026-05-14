@@ -16,7 +16,7 @@ Neuro-Nav is a Chrome Extension designed for software engineers to manage browse
 |---|---|---|
 | Page URLs & Titles | Tab management, browsing graph, session branching | IndexedDB (local) |
 | Page text content | AI-powered semantic search (vector embeddings) | IndexedDB (local) |
-| Tab group states | Session management (branch/stash/checkout) | IndexedDB (local) |
+| Tab and window states | Session management (branch/stash/checkout) | IndexedDB (local) |
 | Browsing navigation | Per-branch browsing graph visualization | IndexedDB (local) |
 
 ### AI Processing
@@ -27,7 +27,7 @@ Neuro-Nav uses the `all-MiniLM-L6-v2` AI model via ONNX Runtime WASM to generate
 
 | Permission | Why it's needed |
 |---|---|
-| `tabs`, `tabGroups`, `windows` | Core functionality: managing tab sessions, branching, and grouping |
+| `tabs`, `windows` | Core functionality: managing tab sessions, branching, and window-scoped context |
 | `<all_urls>` | Extracting page text content for local AI-powered semantic search |
 | `storage`, `unlimitedStorage` | Storing sessions, browsing graph, and vector embeddings locally in IndexedDB |
 | `offscreen` | Running AI inference (ONNX Runtime WASM) in a dedicated document, as required by Manifest V3 |

@@ -9,7 +9,7 @@
   <p><strong>The Developer's Micro-OS: Context management, semantic search, and AI-powered browsing for software engineers.</strong></p>
   
   <p>
-    <img alt="Version" src="https://img.shields.io/badge/version-v1.5.0-blue.svg" />
+    <img alt="Version" src="https://img.shields.io/badge/version-v1.6.0-blue.svg" />
     <img alt="React" src="https://img.shields.io/badge/react-%2320232a.svg?style=flat&logo=react&logoColor=%2361DAFB" />
     <img alt="TailwindCSS" src="https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=flat&logo=tailwind-css&logoColor=white" />
     <img alt="TypeScript" src="https://img.shields.io/badge/typescript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white" />
@@ -34,11 +34,13 @@
 
 Neuro-Nav transforms your browser from a mere "web surfing window" into an **Intelligent Environment (Micro-OS)**. With fully on-device AI vector search, a spider-web graph mapping system, and Git-Flow style tab management, every document you read becomes a part of your "digital brain".
 
-## 🏷️ Release Notes (v1.5.0)
+## 🏷️ Release Notes (v1.6.0)
 
-- **Non-Destructive Session Switching:** Branch checkout now uses Collapse + Discard instead of closing tabs — old groups stay visible on the tab bar while freeing RAM.
-- **Race Condition Protection:** Auto-save blocker (`groupsBeingClosed`) prevents data overwrite during group closure events.
-- **Group-Aware Active Branch:** Popup detects the active branch from the current tab’s Chrome group title, not the last checkout mapping.
+- **Window-Scoped Architecture:** Complete removal of the `chrome.tabGroups` API. Each window is now a branch container ("1 Window = 1 Branch"). The database is the sole source of truth.
+- **Deterministic Checkout:** New "Save-Clear-Inject" workflow replaces the old Collapse/Discard approach — saves current window state, opens target branch tabs, then closes old tabs atomically.
+- **Session Rename:** Inline rename UI for sessions with duplicate-name validation and DB sync.
+- **Simplified Permissions:** Removed `tabGroups` permission from the manifest.
+- **Cleaned Settings:** Removed obsolete "Auto Sync with Browser" toggle (no longer applicable).
 - **Persistent Navigation:** The popup remembers your last active page (Sessions, History, etc.) across close/reopen cycles.
 - **Tab List Performance:** Debounced event listeners (200ms) and removal of flash-clear eliminate jitter in Open Tabs.
 - **Web Map Consolidated:** Browsing graph visualization is now embedded within the History page — removed the standalone nav item.
@@ -234,6 +236,7 @@ Terminal (nav-cli)  ── WebSocket ──→  nav-daemon (:9500)  ←── We
 | `nav branch checkout <name> --new` | Create a new session and switch to it |
 | `nav branch create <name>` | Create and activate a new session |
 | `nav branch delete <id>` | Delete a session by ID |
+| `nav branch rename <id> <new>` | Rename a session |
 | `nav workspace list` | List all saved workspaces |
 | `nav stash` | Stash current tabs to temporary memory |
 | `nav stash pop` | Restore the most recent stash |

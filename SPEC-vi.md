@@ -1,6 +1,6 @@
 # PRODUCT SPECIFICATION: NEURO-NAV (THE DEVELOPERS MICRO-OS)
 
-**Version:** 1.5.0
+**Version:** 1.6.0
 **Target Platform:** Chromium-based Browsers (Chrome, Edge) & Windows/WSL2 Environment
 **Architecture Pattern:** Clean Architecture & Event-Driven Services
 
@@ -75,12 +75,13 @@ Hệ thống tuân thủ Clean Architecture, tách biệt thành 4 phân lớp:
 
 ### PHASE 7: TAB LIFECYCLE & UX POLISH — ✅ HOÀN THÀNH
 
-* **7.1. Collapse/Expand Checkout:** Chuyển phiên sử dụng `chrome.tabGroups.update({ collapsed: true })` + `chrome.tabs.discard()` thay vì xóa tab. Group vẫn hiển thị trên tab bar, đồng thời giải phóng RAM.
-* **7.2. Bảo vệ Race Condition Auto-save:** Bộ chặn `groupsBeingClosed` ngăn debounced auto-save ghi đè IndexedDB bằng mảng rỗng khi group đang bị đóng.
-* **7.3. Nhận diện Branch theo Group:** Popup xác định branch đang active bằng cách đọc tên Chrome group của tab hiện tại, không dựa vào window mapping cũ — chính xác cả khi nhiều group cùng tồn tại.
+* **7.1. Kiến trúc Window-Scoped:** Loại bỏ hoàn toàn `chrome.tabGroups` API. Mỗi cửa sổ trình duyệt ánh xạ tới một branch duy nhất ("1 Cửa sổ = 1 Nhánh"). IndexedDB là nguồn sự thật duy nhất.
+* **7.2. Checkout Save-Clear-Inject:** Quy trình xác định 3 bước: 1) Lưu tab cửa sổ hiện tại vào DB, 2) Mở tab của branch đích, 3) Đóng tab cũ. Thay thế cách tiếp cận Collapse/Discard.
+* **7.3. Đổi tên phiên (Rename):** Giao diện đổi tên inline với kiểm tra trùng lặp. Gọi `branchOps.renameBranch(id, newName)` và đồng bộ DB.
 * **7.4. Ghi nhớ trang Navigation:** Trang nav cuối cùng được lưu vào `chrome.storage.local` và khôi phục khi mở lại popup.
 * **7.5. Hiệu suất Tab List:** Debounce sự kiện tab (200ms batching) và loại bỏ flash-clear (`setTabs([])`) để xóa bỏ hiện tượng giật trong danh sách Open Tabs.
 * **7.6. Gộp Web Map:** Xóa mục "Web Map" riêng lẻ — đồ thị duyệt web giờ được nhúng trong trang History.
+* **7.7. Dọn Settings:** Xóa toggle "Auto Sync with Browser" và quyền `tabGroups` khỏi manifest.
 
 ---
 
@@ -116,10 +117,10 @@ CSS-first config (không cần `tailwind.config.js`). Giảm bundle size, tăng 
 
 Extension bundle ~1.4MB JS (minified). WASM binary ~21.5MB (ONNX Runtime). Đây là chi phí tất yếu cho local ML — chấp nhận để giữ offline-first architecture. Lazy model loading khi cần embedding lần đầu.
 
-### 6. Tab Group Lifecycle (Collapse vs Close)
+### 6. Mô hình Branch theo Window (1 Cửa sổ = 1 Nhánh)
 
-**Quyết định: Collapse + Discard (không phá hủy)**
+**Quyết định: Loại bỏ Tab Groups, sử dụng ánh xạ theo Window**
 
-Chrome Extension API không có phương thức tương đương lệnh "Close Group" trên giao diện (ẩn group nhưng vẫn giữ lại). Sử dụng `chrome.tabs.remove()` sẽ xóa hoàn toàn group. Giải pháp: dùng `chrome.tabGroups.update({ collapsed: true })` thu gọn group trên tab bar, sau đó `chrome.tabs.discard()` từng tab để ngủ đông RAM. Cách này giữ nguyên danh tính group, tránh mất dữ liệu, và cho phép user click vào label để mở rộng lại thủ công.
+`chrome.tabGroups` API tỏ ra không xác định và dễ lỗi cho quản lý branch. v1.6.0 loại bỏ hoàn toàn API này. Mỗi cửa sổ trình duyệt giờ ánh xạ chính xác tới một branch qua registry `windowId → branchId` trong IndexedDB. Checkout tuân theo quy trình xác định "Save-Clear-Inject": lưu tab hiện tại vào DB, mở tab branch đích, đóng tab cũ. Database là nguồn sự thật duy nhất — không phụ thuộc vào trạng thái Chrome để xác định branch.
 
 ---

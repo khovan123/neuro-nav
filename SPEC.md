@@ -1,6 +1,6 @@
 # PRODUCT SPECIFICATION: NEURO-NAV (THE DEVELOPER'S MICRO-OS)
 
-**Version:** 1.5.0
+**Version:** 1.6.0
 **Target Platform:** Chromium-based Browsers (Chrome, Edge) & Windows/WSL2 Environment
 **Architecture Pattern:** Clean Architecture & Event-Driven Services
 
@@ -75,12 +75,13 @@ The system follows Clean Architecture, separated into 4 distinct layers:
 
 ### PHASE 7: TAB LIFECYCLE & UX POLISH — ✅ COMPLETE
 
-* **7.1. Collapse/Expand Checkout:** Session switching uses `chrome.tabGroups.update({ collapsed: true })` + `chrome.tabs.discard()` instead of destructive tab removal. Groups stay visible on the tab bar while freeing RAM.
-* **7.2. Auto-save Race Condition Protection:** `groupsBeingClosed` blocker set prevents the debounced auto-save from overwriting IndexedDB with empty arrays during group closure events.
-* **7.3. Group-Aware Branch Detection:** Popup detects the active branch by querying the current tab's Chrome group title, not the stored window mapping — correct even when multiple groups coexist.
+* **7.1. Window-Scoped Architecture:** Complete removal of `chrome.tabGroups` API. Each browser window maps to a single branch ("1 Window = 1 Branch"). The IndexedDB database is the sole source of truth for branch state.
+* **7.2. Save-Clear-Inject Checkout:** Deterministic 3-step checkout: 1) Save current window tabs to DB, 2) Open target branch tabs, 3) Close old tabs. Replaces the old Collapse/Discard approach.
+* **7.3. Session Rename:** Inline rename UI with duplicate-name validation. Calls `branchOps.renameBranch(id, newName)` and syncs to DB.
 * **7.4. Persistent Navigation:** Last active nav page is saved to `chrome.storage.local` and restored on popup reopen.
 * **7.5. Tab List Performance:** Debounced tab event listeners (200ms batching) and removed flash-clear (`setTabs([])`) to eliminate jitter in the Open Tabs list.
 * **7.6. Web Map Consolidation:** Removed standalone "Web Map" nav item — browsing graph visualization is now embedded within the History page.
+* **7.7. Settings Cleanup:** Removed obsolete "Auto Sync with Browser" toggle and `tabGroups` permission from manifest.
 
 ---
 
@@ -116,10 +117,10 @@ CSS-first config (no `tailwind.config.js` needed). Reduces bundle size and speed
 
 Extension bundle ~1.4MB JS (minified). WASM binary ~21.5MB (ONNX Runtime). This is the inherent cost of local ML — accepted to maintain the offline-first architecture. Lazy model loading on first embedding request.
 
-### 6. Tab Group Lifecycle (Collapse vs Close)
+### 6. Window-Scoped Branch Model (1 Window = 1 Branch)
 
-**Decision: Collapse + Discard (non-destructive)**
+**Decision: Remove Tab Groups, use Window-based mapping**
 
-Chrome Extension API has no programmatic equivalent to the UI's "Close Group" (which hides the group while preserving it). Using `chrome.tabs.remove()` destroys the group entirely. The adopted approach uses `chrome.tabGroups.update({ collapsed: true })` to minimize the group on the tab bar, followed by `chrome.tabs.discard()` on each tab to hibernate RAM. This preserves group identity, prevents data loss, and allows users to click the collapsed label to re-expand manually.
+The `chrome.tabGroups` API proved non-deterministic and fragile for branch management. v1.6.0 removes it entirely. Each browser window is now mapped to exactly one branch via a `windowId → branchId` registry in IndexedDB. Checkout follows a deterministic "Save-Clear-Inject" workflow: save current tabs to DB, open target branch tabs, close old tabs. The database is the single source of truth — no Chrome-specific state is relied upon for branch identity.
 
 ---

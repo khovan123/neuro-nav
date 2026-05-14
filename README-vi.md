@@ -9,7 +9,7 @@
   <p><strong>The Developer's Micro-OS: Context management, semantic search, and AI-powered browsing for software engineers.</strong></p>
   
   <p>
-    <img alt="Version" src="https://img.shields.io/badge/version-v1.5.0-blue.svg" />
+    <img alt="Version" src="https://img.shields.io/badge/version-v1.6.0-blue.svg" />
     <img alt="React" src="https://img.shields.io/badge/react-%2320232a.svg?style=flat&logo=react&logoColor=%2361DAFB" />
     <img alt="TailwindCSS" src="https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=flat&logo=tailwind-css&logoColor=white" />
     <img alt="TypeScript" src="https://img.shields.io/badge/typescript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white" />
@@ -34,12 +34,14 @@
 
 Neuro-Nav biến trình duyệt của bạn từ một "cửa sổ lướt web" thành một **Môi trường hoạt động thông minh (Micro-OS)**. Với công nghệ AI embedding hoàn toàn offline, hệ thống đồ thị mạng nhện (Graph Mapping) theo từng phiên làm việc và quản lý tab theo phong cách Git-Flow, mọi tài liệu bạn đọc đều trở thành một phần của "bộ não kỹ thuật số".
 
-## 🏷️ Release Notes (v1.5.0)
+## 🏷️ Release Notes (v1.6.0)
 
 Phiên bản mới nhất của Neuro-Nav. Bao gồm các cải tiến đáng kể:
-- **Chuyển phiên không phá hủy:** Checkout sử dụng Collapse + Discard thay vì xóa tab — group cũ vẫn hiển thị trên tab bar, giải phóng RAM mà không mất dữ liệu.
-- **Bảo vệ Race Condition:** Bộ chặn `groupsBeingClosed` ngăn auto-save ghi đè dữ liệu khi group đang bị đóng.
-- **Nhận diện Branch theo Group:** Popup đọc tên Chrome group của tab hiện tại thay vì dựa vào window mapping cũ.
+- **Kiến trúc Window-Scoped:** Loại bỏ hoàn toàn `chrome.tabGroups` API. Mỗi cửa sổ giờ là một container cho branch ("1 Cửa sổ = 1 Nhánh"). Database là nguồn sự thật duy nhất.
+- **Checkout xác định:** Quy trình "Save-Clear-Inject" mới thay thế Collapse/Discard — lưu trạng thái cửa sổ, mở tab của branch đích, đóng tab cũ một cách nguyên tử.
+- **Đổi tên phiên:** Giao diện đổi tên inline với kiểm tra trùng lặp và đồng bộ DB.
+- **Quyền đơn giản hóa:** Xóa quyền `tabGroups` khỏi manifest.
+- **Dọn Settings:** Xóa toggle "Auto Sync with Browser" (không còn áp dụng).
 - **Ghi nhớ trang Navigation:** Popup nhớ trang cuối cùng (Sessions, History...) khi mở lại.
 - **Hiệu suất Tab List:** Debounce sự kiện tab (200ms) và loại bỏ flash-clear, xóa hiện tượng giật.
 - **Gộp Web Map:** Đồ thị duyệt web giờ được nhúng trực tiếp trong trang History.
@@ -250,6 +252,7 @@ Chạy `nav help` để xem toàn bộ các lệnh khả dụng:
 | `nav branch checkout <tên> --new` | Tạo phiên mới và chuyển sang |
 | `nav branch create <tên>` | Tạo và kích hoạt phiên mới |
 | `nav branch delete <id>` | Xóa phiên theo ID |
+| `nav branch rename <id> <tên mới>` | Đổi tên phiên |
 | `nav workspace list` | Liệt kê tất cả workspace đã lưu |
 | `nav stash` | Cất toàn bộ tab hiện tại vào bộ nhớ tạm |
 | `nav stash pop` | Khôi phục stash gần nhất |

@@ -102,7 +102,7 @@ async function ensureDaemonRunning(): Promise<boolean> {
 // ---- CLI Helpers ----
 
 function logo() {
-  console.log(`${c.magenta}${c.bold}⚡ Neuro-Nav CLI${c.reset} ${c.dim}v1.5.0${c.reset}`);
+  console.log(`${c.magenta}${c.bold}⚡ Neuro-Nav CLI${c.reset} ${c.dim}v1.6.0${c.reset}`);
   console.log();
 }
 
@@ -120,6 +120,7 @@ function usage() {
   console.log(`  ${c.cyan}branch checkout <name> --new${c.reset}  Open session in a new window`);
   console.log(`  ${c.cyan}branch create <name>${c.reset}          Create and activate a new branch`);
   console.log(`  ${c.cyan}branch delete <id>${c.reset}            Delete a branch by ID`);
+  console.log(`  ${c.cyan}branch rename <id> <new>${c.reset}      Rename a branch`);
   console.log(`  ${c.cyan}branch merge <s> <t>${c.reset}          Merge session <s> into <t>`);
   console.log(`  ${c.cyan}workspace list${c.reset}                List saved workspaces`);
   console.log(`  ${c.cyan}stash${c.reset}                         Stash current tabs`);
@@ -236,6 +237,16 @@ async function handleBranch(args: string[]) {
     if (!id) { console.log(`${c.red}Usage: nav branch delete <id>${c.reset}`); return; }
     await sendCommand('BRANCH_DELETE', { id });
     console.log(`${c.green}✓ Branch deleted${c.reset}`);
+    return;
+  }
+
+  if (sub === 'rename') {
+    const id = args[1];
+    const newName = args[2];
+    if (!id || !newName) { console.log(`${c.red}Usage: nav branch rename <id> <new-name>${c.reset}`); return; }
+    console.log(`${c.cyan}Renaming branch ${c.bold}${id}${c.reset}${c.cyan} → ${c.bold}${newName}${c.reset}...`);
+    const res = await sendCommand('BRANCH_RENAME', { id, name: newName }) as { data?: { name: string } };
+    console.log(`${c.green}✓ Renamed to ${c.bold}${res.data?.name ?? newName}${c.reset}`);
     return;
   }
 

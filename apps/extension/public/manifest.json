@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Neuro-Nav",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "The Developer's Micro-OS — Context management, semantic search, and AI-powered browsing for software engineers.",
   "icons": {
     "16": "icons/icon-16.png",
