@@ -36,18 +36,21 @@ Neuro-Nav transforms your browser from a mere "web surfing window" into an **Int
 
 ## 🏷️ Release Notes (v1.5.0)
 
+- **Non-Destructive Session Switching:** Branch checkout now uses Collapse + Discard instead of closing tabs — old groups stay visible on the tab bar while freeing RAM.
+- **Race Condition Protection:** Auto-save blocker (`groupsBeingClosed`) prevents data overwrite during group closure events.
+- **Group-Aware Active Branch:** Popup detects the active branch from the current tab’s Chrome group title, not the last checkout mapping.
+- **Persistent Navigation:** The popup remembers your last active page (Sessions, History, etc.) across close/reopen cycles.
+- **Tab List Performance:** Debounced event listeners (200ms) and removal of flash-clear eliminate jitter in Open Tabs.
+- **Web Map Consolidated:** Browsing graph visualization is now embedded within the History page — removed the standalone nav item.
 - **Core Framework:** React 18, Vite, Tailwind CSS v4 (CSS-first config), and Manifest V3.
 - **Git-flow Tabs:** Branching (`feat/*`, `chill/*`...), Stash & Pop, Workspace Management.
 - **On-Device AI Search:** Local vector search using `all-MiniLM-L6-v2` via ONNX Runtime WASM. All inference runs on your machine — no cloud, no API keys.
-- **Offscreen Document Architecture:** AI inference runs in a dedicated Offscreen Document, fully compliant with Manifest V3 Service Worker constraints.
 - **Semantic Search:** Local search engine (Orama in-memory DB), indexing up to 5,000 pages via `Cmd+K`.
 - **Per-Branch Graph:** 2D browsing telemetry mapping with D3.js — each branch maintains its own independent graph.
 - **P2P Sync:** Serverless peer-to-peer Workspace synchronization via WebRTC (PeerJS).
 - **CLI Bridge:** Terminal-first workflow with `nav` command, auto-daemon, and project scanning.
-- **Native Messaging:** Auto-start the daemon from the Chrome extension via Chrome's Native Messaging API.
-- **Stable Connectivity:** Exponential backoff WebSocket reconnection with silent HTTP probing to eliminate `ERR_CONNECTION_REFUSED` console noise.
-- **Optimized Builds:** Minified production bundles (~1.4MB JS, ~60% size reduction), with custom Vite plugins to suppress third-party library warnings.
-- **Auto-Maintenance:** Background cleanup every 24 hours, DOM extraction via `requestIdleCallback`.
+- **Native Messaging:** Auto-start the daemon from the Chrome extension via Chrome’s Native Messaging API.
+- **Optimized Builds:** Minified production bundles (~1.4MB JS, ~60% size reduction).
 
 ## ✨ Core Features
 
@@ -122,10 +125,10 @@ Service Worker           Offscreen Document         Web Worker
 | File | Size | Gzip | Content |
 | :--- | :--- | :--- | :--- |
 | `embedding-worker.js` | 870 KB | 228 KB | HuggingFace Transformers + ONNX bindings |
-| `popup.js` | 243 KB | 73 KB | All popup pages & Redux store |
-| `index.js` | 205 KB | 62 KB | React + ReactDOM shared chunk |
+| `popup.js` | 247 KB | 74 KB | All popup pages & Redux store |
+| `index.js` | 206 KB | 62 KB | React + ReactDOM shared chunk |
 | `searchIndex.js` | 86 KB | 28 KB | Orama search engine |
-| `background.js` | 19 KB | 6 KB | Service Worker |
+| `background.js` | 25 KB | 8 KB | Service Worker |
 | ONNX WASM | 21.5 MB | 5 MB | ML inference runtime (cached) |
 
 ---
@@ -203,8 +206,8 @@ This installs a Native Messaging host manifest so the extension can spawn the da
 1. **Launch:** Click the Neuro-Nav icon on the Chrome toolbar or press `Ctrl+Shift+N` / `Cmd+Shift+N`.
 2. **Save a Working Session:** In the **Sessions** tab, create a session (e.g., `feat/login-api`). The system bundles your current tabs into this session.
 3. **AI Search:** Press `Cmd/Ctrl + K` to open the Command Palette. Type a semantic keyword to search across pages you've read.
-4. **Browsing Graph:** Switch to the **Web Map** tab to see a visual map of your browsing for the current session.
-5. **P2P Sharing:** Switch to the **Peers** tab, copy your ID, and share it with a colleague for direct workspace sync.
+4. **Browsing Graph:** Switch to the **History** tab to see a visual map and timeline of your browsing for the current session.
+5. **P2P Sharing:** Switch to the **Team** tab, copy your ID, and share it with a colleague for direct workspace sync.
 
 ---
 

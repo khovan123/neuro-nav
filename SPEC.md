@@ -73,6 +73,15 @@ The system follows Clean Architecture, separated into 4 distinct layers:
 * **6.4. Quiet Transformers Plugin:** Custom Vite plugin converts `console.warn` → `console.log` for HuggingFace library noise.
 * **6.5. Native Tooltips:** Uses `title` attribute instead of CSS tooltips to avoid clipping by the popup viewport boundary.
 
+### PHASE 7: TAB LIFECYCLE & UX POLISH — ✅ COMPLETE
+
+* **7.1. Collapse/Expand Checkout:** Session switching uses `chrome.tabGroups.update({ collapsed: true })` + `chrome.tabs.discard()` instead of destructive tab removal. Groups stay visible on the tab bar while freeing RAM.
+* **7.2. Auto-save Race Condition Protection:** `groupsBeingClosed` blocker set prevents the debounced auto-save from overwriting IndexedDB with empty arrays during group closure events.
+* **7.3. Group-Aware Branch Detection:** Popup detects the active branch by querying the current tab's Chrome group title, not the stored window mapping — correct even when multiple groups coexist.
+* **7.4. Persistent Navigation:** Last active nav page is saved to `chrome.storage.local` and restored on popup reopen.
+* **7.5. Tab List Performance:** Debounced tab event listeners (200ms batching) and removed flash-clear (`setTabs([])`) to eliminate jitter in the Open Tabs list.
+* **7.6. Web Map Consolidation:** Removed standalone "Web Map" nav item — browsing graph visualization is now embedded within the History page.
+
 ---
 
 ## 4. Technical Decisions
@@ -106,5 +115,11 @@ CSS-first config (no `tailwind.config.js` needed). Reduces bundle size and speed
 **Decision: Minify + Accept ML overhead**
 
 Extension bundle ~1.4MB JS (minified). WASM binary ~21.5MB (ONNX Runtime). This is the inherent cost of local ML — accepted to maintain the offline-first architecture. Lazy model loading on first embedding request.
+
+### 6. Tab Group Lifecycle (Collapse vs Close)
+
+**Decision: Collapse + Discard (non-destructive)**
+
+Chrome Extension API has no programmatic equivalent to the UI's "Close Group" (which hides the group while preserving it). Using `chrome.tabs.remove()` destroys the group entirely. The adopted approach uses `chrome.tabGroups.update({ collapsed: true })` to minimize the group on the tab bar, followed by `chrome.tabs.discard()` on each tab to hibernate RAM. This preserves group identity, prevents data loss, and allows users to click the collapsed label to re-expand manually.
 
 ---

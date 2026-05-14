@@ -73,6 +73,15 @@ Hệ thống tuân thủ Clean Architecture, tách biệt thành 4 phân lớp:
 * **6.4. Quiet Transformers Plugin:** Custom Vite plugin chuyển đổi `console.warn` → `console.log` cho HuggingFace library noise.
 * **6.5. Native Tooltips:** Sử dụng `title` attribute thay vì CSS tooltip để tránh bị clip bởi popup viewport boundary.
 
+### PHASE 7: TAB LIFECYCLE & UX POLISH — ✅ HOÀN THÀNH
+
+* **7.1. Collapse/Expand Checkout:** Chuyển phiên sử dụng `chrome.tabGroups.update({ collapsed: true })` + `chrome.tabs.discard()` thay vì xóa tab. Group vẫn hiển thị trên tab bar, đồng thời giải phóng RAM.
+* **7.2. Bảo vệ Race Condition Auto-save:** Bộ chặn `groupsBeingClosed` ngăn debounced auto-save ghi đè IndexedDB bằng mảng rỗng khi group đang bị đóng.
+* **7.3. Nhận diện Branch theo Group:** Popup xác định branch đang active bằng cách đọc tên Chrome group của tab hiện tại, không dựa vào window mapping cũ — chính xác cả khi nhiều group cùng tồn tại.
+* **7.4. Ghi nhớ trang Navigation:** Trang nav cuối cùng được lưu vào `chrome.storage.local` và khôi phục khi mở lại popup.
+* **7.5. Hiệu suất Tab List:** Debounce sự kiện tab (200ms batching) và loại bỏ flash-clear (`setTabs([])`) để xóa bỏ hiện tượng giật trong danh sách Open Tabs.
+* **7.6. Gộp Web Map:** Xóa mục "Web Map" riêng lẻ — đồ thị duyệt web giờ được nhúng trong trang History.
+
 ---
 
 ## 4. Quyết Định Kỹ Thuật
@@ -106,5 +115,11 @@ CSS-first config (không cần `tailwind.config.js`). Giảm bundle size, tăng 
 **Quyết định: Minify + Accept ML overhead**
 
 Extension bundle ~1.4MB JS (minified). WASM binary ~21.5MB (ONNX Runtime). Đây là chi phí tất yếu cho local ML — chấp nhận để giữ offline-first architecture. Lazy model loading khi cần embedding lần đầu.
+
+### 6. Tab Group Lifecycle (Collapse vs Close)
+
+**Quyết định: Collapse + Discard (không phá hủy)**
+
+Chrome Extension API không có phương thức tương đương lệnh "Close Group" trên giao diện (ẩn group nhưng vẫn giữ lại). Sử dụng `chrome.tabs.remove()` sẽ xóa hoàn toàn group. Giải pháp: dùng `chrome.tabGroups.update({ collapsed: true })` thu gọn group trên tab bar, sau đó `chrome.tabs.discard()` từng tab để ngủ đông RAM. Cách này giữ nguyên danh tính group, tránh mất dữ liệu, và cho phép user click vào label để mở rộng lại thủ công.
 
 ---

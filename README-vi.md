@@ -36,19 +36,20 @@ Neuro-Nav biến trình duyệt của bạn từ một "cửa sổ lướt web" 
 
 ## 🏷️ Release Notes (v1.5.0)
 
-Phiên bản khởi chạy đầu tiên của Neuro-Nav. Bao gồm các chức năng cốt lõi đã hoàn thiện:
+Phiên bản mới nhất của Neuro-Nav. Bao gồm các cải tiến đáng kể:
+- **Chuyển phiên không phá hủy:** Checkout sử dụng Collapse + Discard thay vì xóa tab — group cũ vẫn hiển thị trên tab bar, giải phóng RAM mà không mất dữ liệu.
+- **Bảo vệ Race Condition:** Bộ chặn `groupsBeingClosed` ngăn auto-save ghi đè dữ liệu khi group đang bị đóng.
+- **Nhận diện Branch theo Group:** Popup đọc tên Chrome group của tab hiện tại thay vì dựa vào window mapping cũ.
+- **Ghi nhớ trang Navigation:** Popup nhớ trang cuối cùng (Sessions, History...) khi mở lại.
+- **Hiệu suất Tab List:** Debounce sự kiện tab (200ms) và loại bỏ flash-clear, xóa hiện tượng giật.
+- **Gộp Web Map:** Đồ thị duyệt web giờ được nhúng trực tiếp trong trang History.
 - **Core Framework:** Trải nghiệm mượt mà với React 18, Vite, Tailwind CSS v4 (CSS-first config) và chuẩn Manifest V3.
 - **Git-flow Tabs:** Hỗ trợ Branching (`feat/*`, `chill/*`...), Stash & Pop, cùng hệ thống Workspace Management.
-- **AI Search on-device:** Tìm kiếm vector cục bộ bằng `all-MiniLM-L6-v2` qua ONNX Runtime WASM. Toàn bộ inference chạy trên máy bạn — không cloud, không API key.
-- **Offscreen Document:** AI inference chạy trong Offscreen Document riêng biệt, tuân thủ hoàn toàn giới hạn Service Worker của Manifest V3.
+- **AI Search on-device:** Tìm kiếm vector cục bộ bằng `all-MiniLM-L6-v2` qua ONNX Runtime WASM. Toàn bộ inference chạy trên máy bạn.
 - **Semantic Search:** Bộ máy tìm kiếm cục bộ (Orama in-memory DB), index tối đa 5,000 trang gần nhất qua phím tắt `Cmd+K`.
-- **Per-Branch Graph:** Vẽ bản đồ 2D quá trình lướt web bằng D3.js — **mỗi phiên (branch) có bản đồ duyệt web riêng biệt**.
-- **P2P Sync:** Tính năng chia sẻ không-máy-chủ, đồng bộ Workspace ngang hàng qua giao thức WebRTC (PeerJS).
-- **CLI Bridge:** Quy trình làm việc ưu tiên terminal với lệnh `nav`, auto-daemon, và quét dự án.
-- **Native Messaging:** Tự động khởi động daemon từ extension qua Chrome Native Messaging API.
-- **Kết nối ổn định:** WebSocket reconnection với exponential backoff và HTTP probe im lặng, loại bỏ hoàn toàn `ERR_CONNECTION_REFUSED` noise trong console.
-- **Build tối ưu:** Bundle production đã minify (~1.4MB JS, giảm ~60%), với Vite plugin tùy chỉnh để ẩn warning từ thư viện bên thứ ba.
-- **Auto-Maintenance:** Tiến trình chạy ngầm giúp dọn rác bộ nhớ tự động mỗi 24h và trích xuất dữ liệu DOM không gây giật lag (sử dụng `requestIdleCallback`).
+- **P2P Sync:** Đồng bộ Workspace ngang hàng qua WebRTC (PeerJS).
+- **CLI Bridge:** Quy trình làm việc ưu tiên terminal với lệnh `nav`, auto-daemon.
+- **Build tối ưu:** Bundle production đã minify (~1.4MB JS, giảm ~60%).
 
 ## ✨ Tính năng cốt lõi
 
@@ -123,10 +124,10 @@ Service Worker           Offscreen Document         Web Worker
 | File | Kích thước | Gzip | Nội dung |
 | :--- | :--- | :--- | :--- |
 | `embedding-worker.js` | 870 KB | 228 KB | HuggingFace Transformers + ONNX bindings |
-| `popup.js` | 243 KB | 73 KB | Toàn bộ popup pages & Redux store |
-| `index.js` | 205 KB | 62 KB | React + ReactDOM shared chunk |
+| `popup.js` | 247 KB | 74 KB | Toàn bộ popup pages & Redux store |
+| `index.js` | 206 KB | 62 KB | React + ReactDOM shared chunk |
 | `searchIndex.js` | 86 KB | 28 KB | Orama search engine |
-| `background.js` | 19 KB | 6 KB | Service Worker |
+| `background.js` | 25 KB | 8 KB | Service Worker |
 | ONNX WASM | 21.5 MB | 5 MB | ML inference runtime (cached) |
 
 ---
@@ -205,8 +206,8 @@ Lệnh này cài đặt Native Messaging host manifest để extension có thể
 1. **Khởi động:** Click vào icon Neuro-Nav trên thanh công cụ Chrome hoặc bấm phím tắt `Ctrl+Shift+N` (Windows) / `Cmd+Shift+N` (Mac).
 2. **Lưu phiên làm việc:** Ở mục **Sessions**, chọn prefix `feat/` và gõ tên task (ví dụ: `login-api`), bấm Create. Hệ thống sẽ gom các tab hiện tại vào phiên này.
 3. **Tìm kiếm bằng AI:** Bất cứ lúc nào đang lướt web, bấm `Cmd/Ctrl + K` để gọi Command Palette, gõ từ khóa ý nghĩa để lục lọi lại những trang tài liệu bạn đã đọc.
-4. **Bản đồ duyệt web:** Chuyển sang tab **Web Map** để xem bản đồ trực quan quá trình duyệt web của phiên hiện tại.
-5. **Chia sẻ P2P:** Chuyển sang tab **Peers**, lấy ID của bạn gửi cho đồng nghiệp. Nhập ID của đồng nghiệp để kết nối trực tiếp và bấm *Share Workspace*.
+4. **Bản đồ duyệt web:** Chuyển sang tab **History** để xem bản đồ trực quan và dòng thời gian duyệt web của phiên hiện tại.
+5. **Chia sẻ P2P:** Chuyển sang tab **Team**, lấy ID của bạn gửi cho đồng nghiệp. Nhập ID của đồng nghiệp để kết nối trực tiếp và bấm *Share Workspace*.
 
 ---
 
