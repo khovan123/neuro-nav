@@ -19,23 +19,37 @@ export function ActiveTabs() {
 
   // Fetch all tabs on mount
   useEffect(() => {
-    chrome.tabs.query({}, (chromeTabs) => {
-      const entities = chromeTabs.map(fromChromeTab);
-      dispatch(setTabs(entities));
-    });
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Listen for tab updates
-    const onUpdated = (tabId: number, _info: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
-      if (tab.url) {
-        dispatch(setTabs([])); // trigger refetch
+    const refreshTabs = () => {
+      // Debounce: batch rapid tab events into one re-render (200ms)
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
         chrome.tabs.query({}, (chromeTabs) => {
           dispatch(setTabs(chromeTabs.map(fromChromeTab)));
         });
+      }, 200);
+    };
+
+    // Initial load (no debounce)
+    chrome.tabs.query({}, (chromeTabs) => {
+      dispatch(setTabs(chromeTabs.map(fromChromeTab)));
+    });
+
+    // Listen for meaningful tab changes — NO setTabs([]) flash
+    const onUpdated = (_tabId: number, info: chrome.tabs.TabChangeInfo) => {
+      // Only refresh on meaningful changes, not every loading/status event
+      if (info.url || info.title || info.favIconUrl || info.pinned !== undefined) {
+        refreshTabs();
       }
     };
 
     const onRemoved = (tabId: number) => {
       dispatch(removeTab(tabId));
+    };
+
+    const onCreated = () => {
+      refreshTabs();
     };
 
     const onActivated = (info: chrome.tabs.TabActiveInfo) => {
@@ -44,11 +58,14 @@ export function ActiveTabs() {
 
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.onRemoved.addListener(onRemoved);
+    chrome.tabs.onCreated.addListener(onCreated);
     chrome.tabs.onActivated.addListener(onActivated);
 
     return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
       chrome.tabs.onUpdated.removeListener(onUpdated);
       chrome.tabs.onRemoved.removeListener(onRemoved);
+      chrome.tabs.onCreated.removeListener(onCreated);
       chrome.tabs.onActivated.removeListener(onActivated);
     };
   }, [dispatch]);

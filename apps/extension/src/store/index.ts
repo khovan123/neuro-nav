@@ -271,6 +271,11 @@ const navSlice = createSlice({
   reducers: {
     navigate(state, action: PayloadAction<NavPage>) {
       state.currentPage = action.payload;
+      // Persist active page so it survives popup close/reopen
+      chrome.storage.local.set({ neuroNavActivePage: action.payload }).catch(() => {});
+    },
+    restoreNav(state, action: PayloadAction<NavPage>) {
+      state.currentPage = action.payload;
     },
   },
 });
@@ -348,6 +353,6 @@ export const { setWorkspaces, addWorkspace, removeWorkspace, updateWorkspace } =
 export const { setBranches, addBranch, removeBranch, setActiveBranch, setActiveBranchForWindow, setCurrentWindowId, updateBranchInStore } = branchesSlice.actions;
 export const { setStashEntries, addStashEntry, removeLatestStash } = stashSlice.actions;
 export const { setMyPeerInfo, setPeers, updatePeerStatus, removePeer, addIncomingShare, dismissIncomingShare } = peersSlice.actions;
-export const { navigate } = navSlice.actions;
+export const { navigate, restoreNav } = navSlice.actions;
 export const { setProjectContext, clearProjectContext, setDaemonConnected } = projectSlice.actions;
 export const { setAiModelStatus, setAiLoadProgress } = aiSlice.actions;
